@@ -1,0 +1,155 @@
+/*
+ * Global theme — LITERAL VALUES ONLY.
+ *
+ * ---------------------------------------------------------------------------
+ * Why there are no CSS custom properties in this file
+ * ---------------------------------------------------------------------------
+ * The player has to run on the 2017 TV browsers:
+ *
+ *   LG webOS TV 3.5      (2017) -> Chromium 53
+ *   Samsung Tizen TV 3.0 (2017) -> Chromium 47 (worst case; some firmware
+ *                                   reports Chromium 56, so we assume 47)
+ *
+ * `var()` landed in Chromium 49, so on a Chromium 47 set-top panel every
+ * `var()` declaration is thrown away and the UI renders unstyled.
+ *
+ * The usual rescue — writing the literal value first and the `var()` override
+ * second — does NOT survive this build. Vite 8 minifies CSS with lightningcss,
+ * which folds those two declarations together and keeps only the `var()` one:
+ *
+ *   source   color: #6b6375;
+ *            color: var(--text);
+ *   dist     color: var(--text);            <-- fallback silently deleted
+ *
+ * The only structure that survives is an `@supports` gate (see rules.md), and
+ * that gets verbose fast. So this project writes plain literals and gets theme
+ * variants by overriding literals, which is what the dark block below does.
+ *
+ * Other hard rules applied here (see rules.md for the full list):
+ *   - no flexbox `gap`        (Chromium 84+)  -> margins
+ *   - no `svh`/`dvh`          (Chromium 108+) -> `vh`
+ *   - no logical properties   (Chromium 87+)  -> `left`/`right`/`border-left`
+ *   - CSS nesting flattened   (Chromium 120+ in the spec; Vite lowers it, but
+ *                              flattening keeps the source readable and the
+ *                              output independent of the minifier)
+ */
+
+:root {
+  /* `system-ui` / `ui-monospace` are Chromium 56+. A real family is always
+     listed as well so older engines have something to fall back to. */
+  font: 18px/145% Roboto, 'Segoe UI', sans-serif;
+  letter-spacing: 0.18px;
+  color: #6b6375;
+  background: #ffffff;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@media (max-width: 1024px) {
+  :root {
+    font-size: 16px;
+  }
+}
+
+/* Chromium 76+. The TVs never match this query, so they keep the light theme
+   above. Everything below is a literal override — no `var()` anywhere.
+   tv-compat-allow: light mode is a complete, standalone theme. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #9ca3af;
+    background: #16171d;
+  }
+
+  h1,
+  h2,
+  code,
+  .counter {
+    color: #f3f4f6;
+  }
+
+  code {
+    background: #1f2028;
+  }
+
+  #root {
+    border-left-color: #2e303a;
+    border-right-color: #2e303a;
+  }
+
+  #social .button-icon {
+    filter: invert(1) brightness(2);
+  }
+}
+
+#root {
+  width: 1126px;
+  max-width: 100%;
+  margin: 0 auto;
+  text-align: center;
+  /* `border-inline` is Chromium 87+; lightningcss does not lower it for us. */
+  border-left: 1px solid #e5e4e7;
+  border-right: 1px solid #e5e4e7;
+  /* `100svh` is Chromium 108+; `vh` has been there since the beginning. */
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+h1,
+h2 {
+  font-family: 'Segoe UI', Roboto, sans-serif;
+  font-weight: 500;
+  color: #08060d;
+}
+
+h1 {
+  font-size: 56px;
+  letter-spacing: -1.68px;
+  margin: 32px 0;
+}
+
+@media (max-width: 1024px) {
+  h1 {
+    font-size: 36px;
+    margin: 20px 0;
+  }
+}
+
+h2 {
+  font-size: 24px;
+  line-height: 118%;
+  letter-spacing: -0.24px;
+  margin: 0 0 8px;
+}
+
+@media (max-width: 1024px) {
+  h2 {
+    font-size: 20px;
+  }
+}
+
+p {
+  margin: 0;
+}
+
+code,
+.counter {
+  font-family: Consolas, monospace;
+  display: inline-flex;
+  border-radius: 4px;
+  color: #08060d;
+}
+
+code {
+  font-size: 15px;
+  line-height: 135%;
+  padding: 4px 8px;
+  background: #f4f3ec;
+}
