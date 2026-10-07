@@ -213,21 +213,42 @@
 }
 
 /*
- * Offline notice — not part of the pt-player design; it is pinned outside the
- * card and only exists while the socket is down (see index.tsx). tv-compat-allow
- * is not needed: it uses no banned feature.
+ * Bottom-of-screen status line. Not part of the pt-player design: it is pinned
+ * to the viewport rather than placed inside the card, so it can never shift the
+ * card's geometry, which is the whole point of matching the target pixel for
+ * pixel.
+ *
+ * Two users share it, which is why the geometry is on a shared selector:
+ *   .registration__offline  the socket-down notice (currently not rendered —
+ *                           socket wiring in index.tsx is commented out)
+ *   .registration__probe    the temporary API reachability probe
+ *                           (see hooks/useApiProbe.ts)
  */
-.registration__offline {
+.registration__offline,
+.registration__probe {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 8px;
   margin: 0;
-  color: #b91c1c;
   font-size: 13px;
   line-height: 1.5;
   text-align: center;
   word-break: break-all;
+}
+
+.registration__offline {
+  color: #b91c1c;
+}
+
+/* Success uses the same slot as the failure text, but green — a green tick in
+   red is worse than no colour at all. */
+.registration__probe {
+  color: #15803d;
+}
+
+.registration__probe--error {
+  color: #b91c1c;
 }
 
 @media (max-width: 1024px) {

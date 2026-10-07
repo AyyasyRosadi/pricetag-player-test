@@ -1,18 +1,28 @@
-import { useEffect, useState } from 'react'
-import useRegistrationCode, {
+import { useState } from 'react'
+import {
+  REGISTRATION_CODE_KEY,
   WAITING_REGISTRATION_CODE,
-} from '../../hooks/useRegistrationCode'
+} from '../../constants/registration'
+import { useApiProbe } from '../../hooks/useApiProbe'
 import { useFullscreen } from '../../hooks/useFullscreen'
+import { getLocalStorageItem, setLocalStorageItem } from '../../utils/storage'
 import './index.css'
 
-/**
- * How long the socket may stay down before the offline notice is shown.
- *
- * On a cold load `isConnected` is false until the `connect` event arrives, so
- * without this the notice would flash for a few hundred milliseconds and the
- * card would visibly jump. Only a genuinely stuck screen should say anything.
+/*
+ * Disabled together with the socket wiring in `Home` below — restore the three
+ * imports and the two hook calls as a set. They are commented out rather than
+ * removed so the phase 1 / phase 2 code is one `Ctrl+/` away.
  */
-const OFFLINE_NOTICE_DELAY_MS = 5000
+// import useRegistrationCode from '../../hooks/useRegistrationCode'
+// import usePlayerContent from '../../hooks/usePlayerContent'
+// import { useDelayedFlag } from '../../hooks/useDelayedFlag'
+
+/**
+ * How long the socket may stay down before the offline notice is shown. Only
+ * used by the disabled offline notice below; kept so the constant and the
+ * notice travel together.
+ */
+// const OFFLINE_NOTICE_DELAY_MS = 5000
 
 /**
  * Registration screen — a 1:1 port of `pt-player`'s `src/page/home` default
@@ -27,32 +37,52 @@ const OFFLINE_NOTICE_DELAY_MS = 5000
  *   ├─ h1 text-3xl "Welcome to screen"           (text-center mb-10)
  *   ├─ p text-xl "This is your" / text-secondary "Screen Registration Code"
  *   ├─ box  border-orange-500 rounded-3xl h-16 w-[90%] p-10
- *   └─ div  flex-col gap-3 w-[80%] mt-12  → two Buttons, h-16
+ *   └─ div  flex-col gap-3 w-[80%] mt-12  → Buttons, h-16
  */
 function Home() {
-  const { registrationCode, isConnected } = useRegistrationCode()
+  /*
+   * ── Socket.IO + getPlayerContent: TEMPORARILY DISABLED ─────────────────────
+   *
+   * WebSockets do not connect in the current environment, so both hooks are
+   * commented out rather than deleted. `useRegistrationCode.ts` and
+   * `usePlayerContent.ts` are untouched; uncomment the two lines below to
+   * restore phase 1 and phase 2 exactly as they were.
+   *
+   * With them off nothing imports `infra/websocket/socket.ts`, so no connection
+   * is attempted at all (it calls `io(...)` at module scope).
+   */
+  // const { registrationCode, isConnected } = useRegistrationCode()
+  // usePlayerContent(registrationCode)
+
   const { ref: screenRef, isFullscreen, toggle } = useFullscreen<HTMLDivElement>()
 
-  // Manual-entry mode. `pt-player` only toggles this UI — its `submitAnotherCode`
-  // is never wired to the button — so nothing is emitted here either. The input
-  // is kept as local state for the same reason.
+  // With the socket off, the code can no longer be assigned by the backend, so
+  // `localStorage` is the single source of truth for it.
+  const [savedCode, setSavedCode] = useState<string | null>(() =>
+    getLocalStorageItem(REGISTRATION_CODE_KEY),
+  )
+
   const [isEditing, setIsEditing] = useState(false)
   const [draftCode, setDraftCode] = useState('')
-  const [showOffline, setShowOffline] = useState(false)
 
-  // Only surface a connection problem once it has lasted a moment.
-  useEffect(() => {
-    if (isConnected) {
-      setShowOffline(false)
-      return
-    }
-    const timer = setTimeout(() => setShowOffline(true), OFFLINE_NOTICE_DELAY_MS)
-    return () => clearTimeout(timer)
-  }, [isConnected])
+  // Belongs to the socket-down notice at the bottom of this component.
+  // const showOffline = useDelayedFlag(!isConnected, OFFLINE_NOTICE_DELAY_MS)
 
-  const code = registrationCode ?? WAITING_REGISTRATION_CODE
-  const isWaiting = code === WAITING_REGISTRATION_CODE
-  const showInput = isEditing && !isWaiting
+  // TEMPORARY: see hooks/useApiProbe.ts.
+  const probe = useApiProbe()
+
+  const code = savedCode ?? WAITING_REGISTRATION_CODE
+  const showInput = isEditing
+
+  const handleSubmitCode = () => {
+    const trimmed = draftCode.trim()
+    if (!trimmed) return
+
+    setLocalStorageItem(REGISTRATION_CODE_KEY, trimmed)
+    setSavedCode(trimmed)
+    setDraftCode('')
+    setIsEditing(false)
+  }
 
   return (
     <div className="registration" ref={screenRef}>
@@ -84,9 +114,9 @@ function Home() {
         ) : (
           <div
             className={
-              isWaiting
-                ? 'registration__code registration__code--waiting'
-                : 'registration__code'
+              savedCode
+                ? 'registration__code'
+                : 'registration__code registration__code--waiting'
             }
           >
             {code}
@@ -103,23 +133,57 @@ function Home() {
             className="registration__button registration__button--bordered"
             onClick={() => setIsEditing((editing) => !editing)}
           >
-            {isEditing
-              ? 'Use Default Registration Code'
-              : 'Use Another Registration Code'}
+            Insert Code
           </button>
+
+          {/* Only meaningful while the field is open; it commits the draft. */}
+          {isEditing && (
+            <button
+              type="button"
+              className="registration__button"
+              onClick={handleSubmitCode}
+            >
+              Submit
+            </button>
+          )}
         </div>
       </div>
 
       {/*
-       * NOT in `pt-player`. Shown only after the socket has been down for
-       * `OFFLINE_NOTICE_DELAY_MS`, so a healthy screen is pixel-identical to the
-       * Next.js player while a stuck one still says why — a TV gives you no
-       * devtools. It is pinned to the viewport, never inside the card, so it
-       * cannot shift the layout. Delete this block to drop it entirely.
+       * The socket-down notice that used to live in this slot. Left here,
+       * commented, next to its replacement so both halves travel together —
+       * re-enable it with the hook calls at the top of this component.
+       *
+       * {showOffline && (
+       *   <p className="registration__offline">
+       *     Offline — retrying · {import.meta.env.VITE_WS_URL}
+       *   </p>
+       * )}
        */}
-      {showOffline && (
-        <p className="registration__offline">
-          Offline — retrying · {import.meta.env.VITE_WS_URL}
+
+      {/*
+       * TEMPORARY diagnostic, occupying the slot the offline notice used to
+       * (pinned to the viewport, outside the card, so the card geometry is
+       * untouched). See hooks/useApiProbe.ts.
+       */}
+      {probe.status === 200 && (
+        <p className="registration__probe">
+          call api success with status {probe.status}
+          {probe.firstUser
+            ? ` · #${probe.firstUser.id} ${probe.firstUser.first_name} ${probe.firstUser.last_name} (${probe.firstUser.email})`
+            : ''}
+        </p>
+      )}
+
+      {probe.status !== null && probe.status !== 200 && (
+        <p className="registration__probe registration__probe--error">
+          call api failed with status {probe.status}
+        </p>
+      )}
+
+      {probe.error && (
+        <p className="registration__probe registration__probe--error">
+          call api failed · {probe.error}
         </p>
       )}
     </div>

@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
+import {
+  REGISTRATION_CODE_KEY,
+  WAITING_REGISTRATION_CODE,
+} from '../constants/registration'
 import socket from '../infra/websocket/socket'
 import { getLocalStorageItem, setLocalStorageItem } from '../utils/storage'
 
-/** `localStorage` key holding this screen's registration code across reloads. */
-export const REGISTRATION_CODE_KEY = 'registrationCode'
-
-/** Placeholder the backend sends back until an operator claims the screen. */
-export const WAITING_REGISTRATION_CODE = 'Waiting Registration Code'
+// Re-exported so this hook stays the single import site for the registration
+// constants. They are defined in `constants/registration.ts` because importing
+// *this* module runs `infra/websocket/socket.ts`, which opens a connection at
+// import time — a caller that only wants a constant must not trigger that.
+export { REGISTRATION_CODE_KEY, WAITING_REGISTRATION_CODE }
 
 /**
  * Screen geometry reported on connect. The backend uses it to decide which
@@ -40,10 +44,13 @@ export const buildAdditionalInfo = (): TAdditionalInfo => ({
  *   on    registrationCode         (code)                 reserve/assign
  *   on    overwriteRegistrationCode(code)                 operator re-assigned it
  *
- * Deliberately NOT ported yet — `playerContent` and everything that depends on a
- * published layout: `isPublished`, `content_changes`, `checkCodeIsUsed` /
- * `codeIsUsed`, `submitRegistrationCode`, `updateContentSyncProgress`,
- * `request_latest_player_screen`, and all rotation handling.
+ * Deliberately NOT ported yet — everything that depends on a *published layout*:
+ * `content_changes`, `checkCodeIsUsed` / `codeIsUsed`, `submitRegistrationCode`,
+ * `updateContentSyncProgress`, `request_latest_player_screen`, and all rotation
+ * handling.
+ *
+ * `isPublished` and the `getPlayerContent` fetch that hangs off it now live in
+ * `usePlayerContent`, which keeps this hook to the handshake alone.
  */
 export default function useRegistrationCode() {
   const [registrationCode, setRegistrationCode] = useState<string | null>(() =>

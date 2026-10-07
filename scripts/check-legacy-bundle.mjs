@@ -57,7 +57,7 @@ function inspect(file) {
   try {
     ast = parse(code, { sourceType: 'script' })
   } catch (error) {
-    return [{ message: `does not parse as a classic script: ${error.message}`, line: 1 }]
+    return { findings: [{ message: `does not parse as a classic script: ${error.message}`, line: 1 }], notes: [] }
   }
 
   const found = new Map()
@@ -81,7 +81,32 @@ function inspect(file) {
     }
   })
 
-  return [...found].map(([message, line]) => ({ message, line }))
+  /*
+   * Advisory only, never a failure. `globalThis` is Chromium 71+, and a
+   * dependency that ships it almost always writes the safe form —
+   * `typeof globalThis !== 'undefined' ? globalThis : self` — where `typeof` on
+   * an undeclared name returns 'undefined' instead of throwing, so the branch
+   * is never taken on a TV. The unsafe form is a bare `globalThis.foo`, which
+   * throws.
+   *
+   * Telling the two apart needs dataflow analysis (the guarded expression
+   * mentions `globalThis` twice, and the second mention is not itself inside a
+   * `typeof`), so this cannot be an automated rule without false positives.
+   * It is surfaced for a human to confirm instead.
+   */
+  const notes = []
+  const globalThisUses = (code.match(/\bglobalThis\b/g) ?? []).length
+  if (globalThisUses > 0) {
+    const guarded = /typeof\s+globalThis/.test(code)
+    notes.push(
+      `${globalThisUses} × \`globalThis\` (Chromium 71+) — ` +
+        (guarded
+          ? 'a `typeof globalThis` guard is present, which is the safe form. Confirm the fallback still resolves to `self`/`window`.'
+          : 'NO `typeof globalThis` guard found — this will throw on a 2017 TV.'),
+    )
+  }
+
+  return { findings: [...found].map(([message, line]) => ({ message, line })), notes }
 }
 
 function main() {
@@ -99,7 +124,7 @@ function main() {
   let failed = 0
   for (const name of files) {
     const file = join(ASSETS, name)
-    const findings = inspect(file)
+    const { findings, notes } = inspect(file)
     const size = (readFileSync(file).length / 1024).toFixed(1)
     if (findings.length) {
       failed++
@@ -108,6 +133,7 @@ function main() {
     } else {
       console.log(`${relative(ROOT, file).replace(/\\/g, '/')}  (${size} kB)  OK — no post-ES2015 syntax`)
     }
+    for (const note of notes) console.log(`  note   ${note}`)
   }
 
   console.log('')

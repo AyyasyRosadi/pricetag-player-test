@@ -48,6 +48,12 @@ The HTTPS mode mirrors `player-pt` — same domain, same port — but it cannot 
 used from a TV: the domain has no public DNS record and TV browsers do not trust
 the mkcert CA. Use `serve:tv` for the TVs.
 
+> **Current state:** the Socket.IO and `getPlayerContent` wiring is commented out
+> in `src/pages/home/index.tsx` (WebSockets would not connect), and a temporary
+> probe calls `reqres.in` to check that outbound API calls work at all. See
+> [documentation.md §15](./documentation.md#15-current-state-socket-disabled-api-probe-in-its-place)
+> to re-enable.
+
 Configuration lives in `.env` (committed, shared defaults) with per-machine
 overrides in `.env.local` (git-ignored). Only `VITE_`-prefixed keys reach the
 browser, and they are **inlined into the bundle** — never put a secret there.
@@ -55,6 +61,12 @@ browser, and they are **inlined into the bundle** — never put a secret there.
 | Variable | Meaning |
 | --- | --- |
 | `VITE_WS_URL` | Socket.IO origin of the player backend, e.g. `https://pricetag-stag2.mdevoffice.net` |
+| `VITE_API_URL` | REST base for the player API, e.g. `https://pricetag-stag2.mdevoffice.net/api` |
+
+> The REST API only answers origins on the backend's **CORS allow-list**, and the
+> LAN URL the TVs use is not on it — so the registration screen works there while
+> the content API does not. See
+> [documentation.md §14](./documentation.md#14-the-player-api-and-the-cors-allow-list).
 
 > `npm run dev` serves native ES modules with HMR, so **Chromium 47/53/56 cannot
 > load it**. Develop in a modern browser, then verify real TV behaviour against

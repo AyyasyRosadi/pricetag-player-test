@@ -279,6 +279,28 @@ dependency upgrade.
 10. **`screen.orientation` is optional.** The API is Chromium 38+, but some TV
     engines omit it entirely. Reading `screen.orientation.type` unguarded throws
     inside the socket connect handler. Use `?.` with a fallback.
+11. **Never put a `timeout`, `signal` or `cancelToken` on the axios client.**
+    axios only reaches for `AbortController` when one of those is set — its xhr
+    adapter calls `composeSignals(signals, timeout)`, which short-circuits when
+    both are empty, so with `pt-player`'s config (`baseURL` + `withCredentials`
+    only) the constructor never runs. `AbortController` is Chromium 66+, so
+    adding a timeout would work perfectly on a dev machine and break every API
+    call on the TVs. If a timeout is genuinely needed, add an
+    `AbortController` polyfill through `additionalLegacyPolyfills` first. See
+    `src/infra/api/client.ts`.
+12. **A working API is not enough — the origin has to be allow-listed.** The
+    backend reflects `Access-Control-Allow-Origin` only for origins on its
+    list, and the LAN URL the TVs use is *not* on it. State is not subject to
+    CORS, so the socket keeps working and only the REST calls fail — which is
+    exactly the combination that looks like an app bug. Verify an origin with
+    the curl in [documentation.md §14](./documentation.md#14-the-player-api-and-the-cors-allow-list)
+    before believing a failure is in this repo.
+13. **`flex` `gap` and `margin` are additive, and emulating one with the other
+    breaks quietly.** Translating `gap-2 + mt-12` to a single `margin-top: 48px`
+    loses 8px. Likewise a `margin: 0` on a child ties with the `> * + *` rule
+    that plays the gap and wins by source order. Measure the rendered box
+    (`getBoundingClientRect`) rather than reading the stylesheet — both bugs were
+    only visible as a card a few pixels short.
 
 ---
 

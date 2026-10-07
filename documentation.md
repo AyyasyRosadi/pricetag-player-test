@@ -613,3 +613,207 @@ The first prints `200`; the second prints `Verify return code: 0 (ok)`.
 > Changing `HTTPS_PORT` or `HTTPS_DOMAIN` in the environment is supported, but
 > the certificate must then match the domain — regenerate it with
 > `cert:generate` after editing the domain.
+
+---
+
+## 14. The player API, and the CORS allow-list
+
+Phase 2 of the `pt-player` port adds the REST half of the player next to the
+Socket.IO half. The socket assigns the screen a `registrationCode`; the REST API
+is what actually hands back the published layout.
+
+Base URL: `VITE_API_URL` (`.env`), e.g.
+`https://pricetag-stag2.mdevoffice.net/api`. `pt-player` calls the same value
+`NEXT_PUBLIC_API_URL`.
+
+### Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/player-render/auth/requestToken` | Body `{ code, socket_id }`. Answers with a **session cookie**; it is the cookie, not the body, that authorises everything after it. |
+| `GET` | `/player-render/content/getPlayerContent` | The published layout. Takes **no parameters** — the screen is identified by the cookie. |
+
+Both are sent with `withCredentials: true`; without it there is no cookie and the
+second call is a guaranteed `401`.
+
+### Trigger chain
+
+Identical to `pt-player/src/hooks/useSocketIo.tsx`:
+
+```
+socket  isPublished === 'Yes'
+  ->    POST /player-render/auth/requestToken      registrationCode -> cookie
+  ->    GET  /player-render/content/getPlayerContent
+```
+
+`isPublished: 'No'` means the operator unpublished the screen.
+
+> Today the response is **only logged** (`usePlayerContent`). Nothing renders it
+> yet, and neither the `checkCodeIsUsed` echo nor the 5-minute refresh interval
+> `pt-player` runs alongside it is ported.
+
+### ⚠️ The API is served from an allow-list, and that decides where you can test
+
+The backend (Kong) reflects `Access-Control-Allow-Origin` **only for origins on
+its allow-list**. Measured against staging:
+
+| Page origin | `Access-Control-Allow-Origin` |
+| --- | --- |
+| `https://pt-player.mdevoffice.net:3030` | ✅ reflected |
+| `https://pricetag-stag2.mdevoffice.net` | ✅ reflected |
+| `http://172.16.30.107:4173` — the TV URL | ❌ absent |
+| `http://localhost:4173` | ❌ absent |
+| `http://localhost:2020` — `pt-player`'s dev port | ❌ absent |
+
+Confirmed from a real browser, not from curl alone:
+
+```
+https://pt-player.mdevoffice.net:3030   -> HTTP 401 {"message":"No authentication token found"}
+http://172.16.30.107:4173               -> FETCH REJECTED: Failed to fetch
+```
+
+The first means "the request arrived and was refused for lack of a cookie", which
+is the expected pre-`requestToken` state. The second never left the browser.
+
+**Consequences, in order of importance:**
+
+1. `npm run serve:tv` — the URL the TVs actually use — **cannot call the API.**
+   The registration screen works there (the socket is not subject to CORS), but
+   `getPlayerContent` will fail. This is a server-side configuration issue, not
+   a bug in this repo.
+2. `npm run serve:https` **can** call the API, because that origin is
+   allow-listed. This is the only local origin that can, which is the real reason
+   `pt-player`'s dev server runs at that exact domain and port.
+3. To make the API work on a TV, one of these has to happen — none of them is a
+   code change in this repo:
+   - the backend adds the LAN origin to the allow-list;
+   - the player is served from an allow-listed host (a real deployment);
+   - the app is put behind a reverse proxy that serves `/api` **same-origin**, so
+     CORS never applies. This also removes the cookie's cross-site problem, which
+     is the next hurdle after the allow-list (a `Set-Cookie` without
+     `SameSite=None; Secure` is dropped on a cross-site request).
+
+`describeApiError` (`src/infra/api/error.ts`) exists to make this failure legible:
+a rejected-by-CORS call has no `response` at all, so it reports
+"the request never reached the API" instead of axios's bare "Network Error".
+
+### Checking it by hand
+
+```sh
+API=https://pricetag-stag2.mdevoffice.net/api
+
+# Is an origin allow-listed?  (empty = no)
+curl -s -D - -o /dev/null -X OPTIONS "$API/player-render/content/getPlayerContent" \
+  -H "Origin: http://172.16.30.107:4173" \
+  -H "Access-Control-Request-Method: GET" | grep -i access-control-allow-origin
+
+# Does the API answer at all?  (404 "Player not found" for a bogus code)
+curl -s -X POST "$API/player-render/auth/requestToken" \
+  -H 'Content-Type: application/json' \
+  -d '{"code":"nope","socket_id":"nope"}'
+```
+
+To watch the real flow, open the app at `https://pt-player.mdevoffice.net:3030`,
+publish the screen in the CMS, and read the console:
+
+```
+[player-content] isPublished: Yes
+[player-content] requestToken ok: {…}
+[player-content] getPlayerContent: {…}
+```
+
+### Ported / not ported
+
+Ported: the axios client (`src/infra/api/client.ts`), `requestPlayerToken`,
+`getPlayerContent`, `describeApiError`, and the `isPublished` trigger.
+
+Not ported: rendering anything, `content_changes` (a full page reload in
+`pt-player`), `checkCodeIsUsed` / `codeIsUsed`, `submitRegistrationCode`,
+`updateContentSyncProgress`, `request_latest_player_screen`, rotation, and the
+5-minute refresh interval.
+
+---
+
+## 15. Current state: socket disabled, API probe in its place
+
+WebSockets would not connect in the test environment, so the Socket.IO and
+`getPlayerContent` wiring is **commented out, not deleted**.
+
+### What is switched off
+
+In `src/pages/home/index.tsx`, four lines are commented, in two groups:
+
+```tsx
+// import useRegistrationCode from '../../hooks/useRegistrationCode'
+// import usePlayerContent from '../../hooks/usePlayerContent'
+// import { useDelayedFlag } from '../../hooks/useDelayedFlag'
+// const OFFLINE_NOTICE_DELAY_MS = 5000
+
+// const { registrationCode, isConnected } = useRegistrationCode()
+// usePlayerContent(registrationCode)
+// const showOffline = useDelayedFlag(!isConnected, OFFLINE_NOTICE_DELAY_MS)
+```
+
+and the socket-down notice is kept commented next to its replacement at the
+bottom of the returned JSX.
+
+Uncommenting those lines restores phases 1 and 2 exactly as they were.
+`useRegistrationCode.ts`, `usePlayerContent.ts`, `useDelayedFlag.ts`,
+`infra/websocket/socket.ts` and `infra/api/*` are all untouched.
+
+**Nothing imports `socket.ts` while this is off**, and `socket.ts` calls
+`io(...)` at module scope — so no connection is attempted at all. It also means
+`socket.io-client` and `axios` are no longer in the bundle:
+
+| | with socket + API | disabled + probe |
+| --- | --- | --- |
+| `index-legacy.js` | 241.0 kB | **153.5 kB** |
+| `polyfills-legacy.js` | 145.8 kB | **81.2 kB** |
+| `index.js` | 223.3 kB | **144.5 kB** |
+| build time | 13.6 s | **4.2 s** |
+
+### The probe
+
+`src/hooks/useApiProbe.ts` — clearly marked temporary — fetches
+`https://reqres.in/api/users?page=1` and reports into the slot the offline notice
+used (viewport-pinned, outside the card, so the card geometry is untouched):
+
+```
+call api success with status 200 · #1 George Bluth (george.bluth@reqres.in)
+```
+
+Green on `200`, red on any other status or on a failed request. Only
+`status === 200` produces the "call api success" wording; anything else is
+reported as a failure so it is obvious which happened.
+
+Two things about it are deliberate:
+
+1. **`fetch`, not the shared `apiClient`.** reqres answers with
+   `Access-Control-Allow-Origin: *`, and a wildcard forbids credentialed
+   requests. `apiClient` sets `withCredentials: true`, so the browser would
+   reject the response before the app saw a status code — a false negative. It
+   also must not inherit `baseURL`, which points at the player API.
+2. **It is a remote runtime dependency**, which rules.md §5 forbids for shipped
+   code. That is why it lives in a file named after the probe rather than in
+   `infra/api`, and why removing it is a three-step job: delete the file, delete
+   the probe block in `pages/home/index.tsx`, delete the `.registration__probe`
+   rules in `pages/home/index.css`.
+
+Ratelimit on the public endpoint is 20 requests / 60 s; the probe fires once per
+page load.
+
+### Insert Code / Submit
+
+The second card button is now **Insert Code** (it toggles the text field, as
+before) and a **Submit** button appears below it while the field is open. Submit
+writes the trimmed value to `localStorage` under `registrationCode`, updates the
+displayed code and closes the field.
+
+With the socket off there is no backend to assign a code, so `localStorage` is
+the only source of truth for it — the card reads it on mount.
+
+> The registration constants (`REGISTRATION_CODE_KEY`,
+> `WAITING_REGISTRATION_CODE`) moved to `src/constants/registration.ts`.
+> `useRegistrationCode` re-exports them, so no import site changed. The move
+> matters because importing that hook runs `socket.ts` as a side effect, and the
+> home page must not reconnect just to read a string.

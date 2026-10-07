@@ -9,6 +9,8 @@
 interface ImportMetaEnv {
   /** Socket.IO origin of the player backend, e.g. `https://pricetag-stag2.mdevoffice.net`. */
   readonly VITE_WS_URL: string
+  /** REST base for the player API, e.g. `https://pricetag-stag2.mdevoffice.net/api`. */
+  readonly VITE_API_URL: string
 }
 
 interface ImportMeta {
