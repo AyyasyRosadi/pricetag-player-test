@@ -1,0 +1,16 @@
+/*
+ * Replacement for `pt-player`'s `object-running-text/v1/styleV1.module.css`.
+ *
+ * Only `.container` was actually applied, through a CSS-module import. This is
+ * a plain stylesheet with a plain class, so the widget can use `className`
+ * directly without a module.
+ */
+.running-text {
+  overflow: hidden;
+  white-space: nowrap;
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  position: relative;
+}

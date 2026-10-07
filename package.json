@@ -19,9 +19,12 @@
   },
   "dependencies": {
     "axios": "^1.13.2",
+    "dayjs": "^1.11.23",
+    "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
+    "react-barcode": "^1.6.1",
     "react-dom": "^18.3.1",
-    "socket.io-client": "^4.8.4"
+    "react-fast-marquee": "^1.6.5"
   },
   "devDependencies": {
     "@babel/parser": "^8.0.6",
@@ -33,6 +36,7 @@
     "autoprefixer": "^10.6.1",
     "oxlint": "^1.81.0",
     "postcss": "^8.5.29",
+    "resize-observer-polyfill": "^1.5.1",
     "terser": "^5.51.2",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"

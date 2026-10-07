@@ -1,3 +1,4 @@
+import { fileURLToPath, URL } from 'node:url'
 import legacy from '@vitejs/plugin-legacy'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
@@ -36,15 +37,25 @@ export default defineConfig({
       // Babel's polyfills are usage-based and only cover JS language features
       // plus statically visible built-ins, for code it can see at build time.
       // Web platform APIs that Chromium 47 lacks are NOT detected
-      // automatically — add them here when a dependency starts needing one:
+      // automatically, so the ones the ported widgets need are listed here.
       //
-      //   additionalLegacyPolyfills: ['resize-observer-polyfill'],
+      // ResizeObserver (Chromium 64) is used by the frame canvas
+      // (`components/molecules/my-frame`) to re-measure on layout changes.
+      // Without this the canvas throws on first paint on both 2017 TVs.
       //
-      // Common candidates: ResizeObserver (Chromium 64),
-      // IntersectionObserver (Chromium 51), AbortController (Chromium 66),
-      // Web Animations `Element.animate` (Chromium 84).
+      // Common candidates not needed yet: IntersectionObserver (Chromium 51),
+      // AbortController (Chromium 66), Web Animations `Element.animate`
+      // (Chromium 84).
+      additionalLegacyPolyfills: ['resize-observer-polyfill'],
     }),
   ],
+  resolve: {
+    // `@/…` mirrors `pt-player`'s tsconfig paths, so ported widget files can
+    // keep their import specifiers verbatim.
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
   build: {
     // Vite 8 minifies CSS with lightningcss by default, and `cssTarget` is what
     // drives its lowering pass (it takes precedence over

@@ -1,19 +1,32 @@
-import type { TPlayerContent } from '../../types/player-content'
+import type { PlayerContent } from '@/types/player-content'
 import apiClient from './client'
 
 /**
- * Exchanges this screen's registration code for a session cookie.
+ * Player REST API — ported from `pt-player/src/infra/api/player.ts` plus the
+ * `requestToken` callback from `pt-player/src/hooks/useSocketIo.tsx`.
  *
- * Ported from `pt-player/src/hooks/useSocketIo.tsx` (`requestToken`) on top of
- * this repo's `apiClient`. The cookie — not the response body — is the point:
- * it authorises every later call, so this has to happen before
- * `getPlayerContent`.
+ * All three calls are cookie-authorised. `requestPlayerToken` is what issues the
+ * cookie; without it the other two answer `401 {"message":"No authentication
+ * token found"}`.
  *
- * `pt-player` gates at `if (response.ok)`, reading a body field. The body is
- * returned untouched here so the caller can apply the same check once the real
- * payload shape is confirmed against the backend.
+ * NOTE: with the socket layer removed there is currently nothing that calls
+ * `requestPlayerToken` or `getPlayerContent` — the frame renders from
+ * `constants/dummy.ts` instead. They are kept because they are the REST half of
+ * the port and are what a future trigger should use.
+ *
+ * `getPlayerPresignUrl` IS live: the video widget calls it, and falls back to
+ * the payload's own URL when it fails.
  */
-export const requestPlayerToken = (code: string, socketId: string | undefined) =>
+
+/**
+ * Exchanges a registration code for a session cookie.
+ *
+ * `socket_id` came from the Socket.IO connection. The backend historically used
+ * it to tie the session to a live socket; with the socket gone `undefined` is
+ * sent. If the endpoint starts rejecting that, it needs a replacement
+ * correlation id rather than a socket.
+ */
+export const requestPlayerToken = (code: string, socketId?: string) =>
   apiClient.post<{ ok?: boolean }>('/player-render/auth/requestToken', {
     code,
     socket_id: socketId,
@@ -21,10 +34,19 @@ export const requestPlayerToken = (code: string, socketId: string | undefined) =
 
 /**
  * The published layout for whichever screen the session cookie belongs to.
- *
- * Ported from `pt-player/src/infra/api/player.ts`. The endpoint takes no
- * parameters — the screen is identified by the cookie, which is why
- * `requestPlayerToken` has to succeed first.
+ * Takes no parameters — the screen is identified by the cookie.
  */
 export const getPlayerContent = () =>
-  apiClient.get<TPlayerContent>('/player-render/content/getPlayerContent')
+  apiClient.get<PlayerContent.PlayerContentData>(
+    '/player-render/content/getPlayerContent',
+  )
+
+/**
+ * Turns a media path into a short-lived presigned URL.
+ * Used by the video widget before every clip.
+ */
+export const getPlayerPresignUrl = (data: { path: string }) =>
+  apiClient.post<{ url?: string }>(
+    '/player-render/media/getNewPresignedUrl',
+    data,
+  )

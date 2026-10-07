@@ -1,14 +1,12 @@
 /**
  * Registration-code constants.
  *
- * These live here rather than in `hooks/useRegistrationCode.ts` because
- * importing that module has a **side effect**: it imports
- * `infra/websocket/socket.ts`, which calls `io(...)` at module scope and opens a
- * connection immediately. Anything that only wants a constant — the home page,
- * for instance, while the socket is disabled — must not be able to trigger that
- * by accident.
- *
- * `useRegistrationCode` re-exports both, so existing import sites keep working.
+ * They live here rather than beside the registration UI so that anything needing
+ * only a constant does not have to pull in a module with side effects. That was
+ * originally because `hooks/useRegistrationCode.ts` opened a Socket.IO
+ * connection at import time; the socket layer is gone now, but the split is
+ * still the right shape — `pages/home` reads the code from `localStorage` and
+ * these are the only two strings it needs.
  */
 
 /** `localStorage` key holding this screen's registration code across reloads. */

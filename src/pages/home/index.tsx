@@ -2,77 +2,40 @@ import { useState } from 'react'
 import {
   REGISTRATION_CODE_KEY,
   WAITING_REGISTRATION_CODE,
-} from '../../constants/registration'
-import { useApiProbe } from '../../hooks/useApiProbe'
-import { useFullscreen } from '../../hooks/useFullscreen'
-import { getLocalStorageItem, setLocalStorageItem } from '../../utils/storage'
+} from '@/constants/registration'
+import { dummyData } from '@/constants/dummy'
+import { useApiProbe } from '@/hooks/useApiProbe'
+import { useFullscreen } from '@/hooks/useFullscreen'
+import Content from '@/pages/content'
+import { getLocalStorageItem, setLocalStorageItem } from '@/utils/storage'
 import './index.css'
-
-/*
- * Disabled together with the socket wiring in `Home` below — restore the three
- * imports and the two hook calls as a set. They are commented out rather than
- * removed so the phase 1 / phase 2 code is one `Ctrl+/` away.
- */
-// import useRegistrationCode from '../../hooks/useRegistrationCode'
-// import usePlayerContent from '../../hooks/usePlayerContent'
-// import { useDelayedFlag } from '../../hooks/useDelayedFlag'
-
-/**
- * How long the socket may stay down before the offline notice is shown. Only
- * used by the disabled offline notice below; kept so the constant and the
- * notice travel together.
- */
-// const OFFLINE_NOTICE_DELAY_MS = 5000
 
 /**
  * Registration screen — a 1:1 port of `pt-player`'s `src/page/home` default
- * variant, so the two players are visually identical.
+ * variant, so the two players are visually identical. The card geometry in
+ * `index.css` is the Tailwind class list from that file resolved to pixels and
+ * verified against a screenshot of the running Next.js player.
  *
- * The values in `index.css` are not eyeballed; they are the Tailwind classes
- * from that file resolved to pixels (and cross-checked against a screenshot of
- * the running Next.js player). The original markup is:
+ * The Socket.IO wiring that used to live here is gone; `registrationCode` now
+ * comes from `localStorage` alone (see the Insert Code / Submit buttons).
  *
- *   bg-gray-200 / Card w-lg px-4 py-10 rounded-4xl flex-col gap-2
- *   ├─ icon w-16 h-16  +  title w-80 h-20        (flex gap-3)
- *   ├─ h1 text-3xl "Welcome to screen"           (text-center mb-10)
- *   ├─ p text-xl "This is your" / text-secondary "Screen Registration Code"
- *   ├─ box  border-orange-500 rounded-3xl h-16 w-[90%] p-10
- *   └─ div  flex-col gap-3 w-[80%] mt-12  → Buttons, h-16
+ * "Show Content" renders `constants/dummy.ts` through the ported frame renderer
+ * (`pages/content`), which is the same path a real payload will take.
  */
 function Home() {
-  /*
-   * ── Socket.IO + getPlayerContent: TEMPORARILY DISABLED ─────────────────────
-   *
-   * WebSockets do not connect in the current environment, so both hooks are
-   * commented out rather than deleted. `useRegistrationCode.ts` and
-   * `usePlayerContent.ts` are untouched; uncomment the two lines below to
-   * restore phase 1 and phase 2 exactly as they were.
-   *
-   * With them off nothing imports `infra/websocket/socket.ts`, so no connection
-   * is attempted at all (it calls `io(...)` at module scope).
-   */
-  // const { registrationCode, isConnected } = useRegistrationCode()
-  // usePlayerContent(registrationCode)
-
   const { ref: screenRef, isFullscreen, toggle } = useFullscreen<HTMLDivElement>()
 
-  // With the socket off, the code can no longer be assigned by the backend, so
-  // `localStorage` is the single source of truth for it.
   const [savedCode, setSavedCode] = useState<string | null>(() =>
     getLocalStorageItem(REGISTRATION_CODE_KEY),
   )
-
   const [isEditing, setIsEditing] = useState(false)
   const [draftCode, setDraftCode] = useState('')
-
-  // Belongs to the socket-down notice at the bottom of this component.
-  // const showOffline = useDelayedFlag(!isConnected, OFFLINE_NOTICE_DELAY_MS)
+  const [showContent, setShowContent] = useState(false)
 
   // TEMPORARY: see hooks/useApiProbe.ts.
   const probe = useApiProbe()
 
   const code = savedCode ?? WAITING_REGISTRATION_CODE
-  const showInput = isEditing
 
   const handleSubmitCode = () => {
     const trimmed = draftCode.trim()
@@ -82,6 +45,27 @@ function Home() {
     setSavedCode(trimmed)
     setDraftCode('')
     setIsEditing(false)
+  }
+
+  /*
+   * The frame canvas is `position: fixed` and covers the viewport, so the card
+   * cannot be clicked through while it is up. That is why there is a close
+   * affordance here — a TV has no reload button, and without it the only way
+   * back to the registration screen would be power-cycling the device.
+   */
+  if (showContent) {
+    return (
+      <>
+        <Content {...dummyData} />
+        <button
+          type="button"
+          className="content-close"
+          onClick={() => setShowContent(false)}
+        >
+          Close content
+        </button>
+      </>
+    )
   }
 
   return (
@@ -105,7 +89,7 @@ function Home() {
           <p className="registration__lead-accent">Screen Registration Code</p>
         </div>
 
-        {showInput ? (
+        {isEditing ? (
           <input
             className="registration__code registration__code--input"
             value={draftCode}
@@ -146,20 +130,16 @@ function Home() {
               Submit
             </button>
           )}
+
+          <button
+            type="button"
+            className="registration__button registration__button--bordered"
+            onClick={() => setShowContent(true)}
+          >
+            Show Content
+          </button>
         </div>
       </div>
-
-      {/*
-       * The socket-down notice that used to live in this slot. Left here,
-       * commented, next to its replacement so both halves travel together —
-       * re-enable it with the hook calls at the top of this component.
-       *
-       * {showOffline && (
-       *   <p className="registration__offline">
-       *     Offline — retrying · {import.meta.env.VITE_WS_URL}
-       *   </p>
-       * )}
-       */}
 
       {/*
        * TEMPORARY diagnostic, occupying the slot the offline notice used to

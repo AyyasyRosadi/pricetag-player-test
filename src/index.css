@@ -67,6 +67,35 @@ body {
   flex-direction: column;
 }
 
+/*
+ * "Close content" affordance while the frame canvas is up. NOT part of
+ * `pt-player` — the frame is `position: fixed` and swallows the viewport, so
+ * without this there is no way back to the registration screen on a TV (no
+ * reload button, no keyboard). Kept tiny and in a corner so it does not
+ * obstruct the layout being previewed.
+ */
+.content-close {
+  position: fixed;
+  left: 8px;
+  top: 8px;
+  z-index: 2147483647;
+  padding: 6px 12px;
+  border: 1px solid #ffffff;
+  border-radius: 6px;
+  background: #000000;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 14px;
+  opacity: 0.35;
+  cursor: pointer;
+}
+
+.content-close:focus {
+  opacity: 1;
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+
 /* Form controls do not inherit the document font by default, which is very
    visible on the oversized TV type scale. */
 button,

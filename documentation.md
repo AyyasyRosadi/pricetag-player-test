@@ -817,3 +817,131 @@ the only source of truth for it — the card reads it on mount.
 > `useRegistrationCode` re-exports them, so no import site changed. The move
 > matters because importing that hook runs `socket.ts` as a side effect, and the
 > home page must not reconnect just to read a string.
+
+---
+
+## 16. The widget layer: canvas, widgets and dummy rendering
+
+The entire widget layer of `pt-player` is now ported: the frame canvas, all 14
+object widgets, and the renderer that turns a payload into a positioned layout.
+
+### Socket.IO is gone
+
+`src/infra/websocket/`, `hooks/useRegistrationCode.ts`,
+`hooks/usePlayerContent.ts` and `hooks/useDelayedFlag.ts` are deleted, and
+`socket.io-client` is uninstalled. Nothing in the bundle references socket.io or
+engine.io any more.
+
+`infra/api/*` (axios) survives, because `getPlayerPresignUrl` is still used — by
+the video widget.
+
+### Layout
+
+```
+src/constants/
+  object.ts            LayoutFrameConstants (content types)     [ported]
+  dummy.ts             the sample payload to render             [provided by you]
+src/types/
+  frame.ts  items.ts  object.ts  player-content.ts              [ported]
+src/utils/
+  parseToJson.ts  formatNumber.ts  loadFont.ts  videoPlayback.ts [ported]
+src/components/molecules/my-frame/index.tsx                     [ported]
+src/components/atoms/object-*/index.tsx     14 widgets          [ported]
+src/pages/content/index.tsx                  frame renderer     [ported]
+src/pages/content/components/wrapper.tsx     widget dispatcher  [ported]
+src/pages/content/frame-context.ts           FrameContext       [split out]
+```
+
+### "Show Content"
+
+`pages/home` gains a **Show Content** button below Insert Code. It renders
+`constants/dummy.ts` through `pages/content`, which is the same path a real
+payload takes. Because the canvas is `position: fixed` and swallows the viewport,
+a small **Close content** button is pinned to the top-left — a TV has no reload
+button, so without it the only way back would be power-cycling.
+
+Verified rendered text from the dummy payload:
+
+```
+Loading video…  ~  Matoa KG  ~  225.000  ~  / Kg  ~  10 October 2026
+~  Special Price Until:  ~  Close content
+```
+
+### Two `erasableSyntaxOnly` problems, and how they were solved
+
+1. **`namespace` is banned** — it emits runtime code. `pt-player` declares every
+   type namespace that way (`LayoutFrameTypes`, `ItemsTypes`, …) and the widgets
+   are written against `LayoutFrameTypes.LayoutZone`-style qualified names. These
+   became `export declare namespace X { export { … } }` — ambient, type-only,
+   so nothing is emitted, and the widget code stays verbatim. A plain
+   `export type LayoutFrameTypes = { … }` does **not** work: TypeScript refuses
+   qualified access through a type alias.
+   `LayoutFrameConstants` holds values, so it became a plain `const` object.
+2. **`noUnusedLocals` / `noUnusedParameters`** — the upstream widgets carry
+   CMS-editor props (`isSelected`, `setWidth`, `setHeight`, `updateSize`) and
+   unused imports. Those are dropped, not stubbed.
+
+### New dependencies
+
+| Package | Needed by | Notes |
+| --- | --- | --- |
+| `dayjs` | period widget | ES5-safe; its `globalThis` reference is `typeof`-guarded with a `self` fallback |
+| `react-barcode` | barcode widget | clean — no modern APIs found |
+| `qrcode.react` | barcode widget (QR) | clean |
+| `react-fast-marquee` | running-text widget | **uses `ResizeObserver`** |
+| `resize-observer-polyfill` | devDependency | supplies `ResizeObserver` for the legacy bundle only |
+
+`ResizeObserver` is Chromium 64+, and it is required **twice**: by the canvas and
+by `react-fast-marquee`. It is provided through `additionalLegacyPolyfills` in
+`vite.config.ts`, which lands in the `polyfills-legacy` chunk that loads before
+the app. Both call sites carry a `tv-compat-allow` marker so `check:tv` does not
+re-report them.
+
+Bundle cost of the whole layer:
+
+| | before | after |
+| --- | --- | --- |
+| `index-legacy.js` | 153.5 kB | **319.5 kB** |
+| `polyfills-legacy.js` | 81.2 kB | **157.2 kB** (~76 kB is the observer polyfill) |
+| `index.js` | 144.5 kB | **299.5 kB** |
+
+`npm run check:bundle` still reports both legacy bundles as Chromium 47 safe.
+
+### Adaptations from upstream
+
+Every one is commented at its site:
+
+- `@/…` path alias added to `vite.config.ts` + `tsconfig.app.json` so ported
+  files keep their import specifiers.
+- The `index.tsx` version dispatcher in each widget is collapsed into the widget
+  file — both `switch` branches return `V1` upstream.
+- `object-image copy/` renamed `object-frame-image/` (a space in a module path).
+- `next/image` → `<img>`; `?fromAndroid` / `useSearchParams` dropped;
+  `TRotationDegree` / `setIsNeedToRotate` props dropped (they came from the
+  socket hook).
+- Tailwind / daisyUI class names inside widgets → inline styles (no Tailwind
+  build here). The price widget's `justifyContent`/`flexWrap`/`gap` are inert
+  upstream too (no `display: flex`) and were left alone to match the CMS preview.
+- `styleV1.module.css` → a plain `index.css`.
+- `memo(deepEqual)` → plain `memo`; `useCallback` with a mismatched dep list →
+  a plain function.
+- The video widget falls back to the payload's own `VideoUrl` when the presign
+  call fails, so it renders while the API is unreachable.
+- `loadFontWithCrossorigin` is deduped (upstream appends a new `<link>` per
+  widget mount, unbounded on a screen that runs for weeks).
+
+### ⚠️ Known deviation from rules.md §5
+
+The widgets load their fonts from Google Fonts at runtime
+(`utils/loadFont.ts`), which rules.md forbids for shipped code. This was a
+deliberate decision: widget typography comes from the CMS, and without the
+webfont the frame does not match the CMS preview at all. On an offline screen the
+request fails silently and text falls back — nothing breaks, but the layout will
+not match. To make it fully offline-safe, delete the
+`loadFontWithCrossorigin(...)` calls in the widgets.
+
+### Not ported
+
+`toggle-fullscreen` (a HeroUI button) and `my-autoscale-card` (a CMS preview
+helper) — neither is a frame widget, and both would need HeroUI/Tailwind. Also
+not ported: the scheduler, screen rotation, and the content-diff/watchdog logic.

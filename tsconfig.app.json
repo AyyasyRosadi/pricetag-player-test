@@ -16,6 +16,14 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /* Mirrors `pt-player`'s tsconfig paths so ported widget files keep their
+       import specifiers verbatim. Kept in sync with `resolve.alias` in
+       vite.config.ts. No `baseUrl`: it is deprecated in TypeScript 7, and
+       `paths` resolves relative to this file without it. */
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+
     /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,

@@ -44,26 +44,32 @@ src/
   index.css             ← global styles (literal values only)
   vite-env.d.ts         ← types for ImportMetaEnv
   hooks/
-    useRegistrationCode.ts ← phase 1: Socket.IO registration handshake  [DISABLED]
-    usePlayerContent.ts    ← phase 2: isPublished -> requestToken -> getPlayerContent  [DISABLED]
     useFullscreen.ts       ← Fullscreen API with the webkit fallback
-    useDelayedFlag.ts      ← "true after N ms" latch, to stop notices flashing  [DISABLED]
     useApiProbe.ts         ← TEMPORARY reqres.in reachability probe
-  infra/websocket/
-    socket.ts              ← the single shared Socket.IO connection  [not imported]
   infra/api/
     client.ts              ← axios instance (withCredentials; NEVER add a timeout)
-    player.ts              ← requestPlayerToken + getPlayerContent
+    player.ts              ← requestPlayerToken / getPlayerContent / getPlayerPresignUrl
     error.ts               ← describeApiError, incl. the CORS case
-  constants/registration.ts ← registration key + placeholder constant
-  types/player-content.ts  ← loose shape of the getPlayerContent payload
-  utils/storage.ts         ← localStorage wrappers (they catch — see rules.md §6.8)
+  constants/
+    registration.ts        ← registration key + placeholder constant
+    object.ts              ← LayoutFrameConstants (frame content types)
+    dummy.ts               ← the sample payload the frame renders
+  types/
+    frame.ts items.ts object.ts player-content.ts ← ported from pt-player
+  utils/
+    storage.ts             ← localStorage wrappers (they catch — see rules.md §6.8)
+    parseToJson.ts formatNumber.ts loadFont.ts videoPlayback.ts ← ported
+  components/
+    molecules/my-frame/    ← the frame canvas (scales a fixed design to the screen)
+    atoms/object-*/        ← 14 widgets, one file each (see documentation.md §16)
   pages/
     home/                  ← registration screen (the default page)
+    content/               ← frame renderer + widget dispatcher
     media-smoke/           ← manual image/video check, not rendered by default
 public/
   favicon.svg
   images/                  ← icon.png + title.svg, brand assets
+  fonts/                   ← self-hosted Montserrat (latin, 500)
 rules.md                ← MUST / MUST NOT browser-support contract
 documentation.md        ← architecture, build, testing, troubleshooting
 ```
@@ -71,44 +77,47 @@ documentation.md        ← architecture, build, testing, troubleshooting
 Deliverable: `dist/` (git-ignored). The only server-side code is the local
 `scripts/serve-https.mjs` dev server — there is no application backend here.
 
+> Socket.IO has been removed entirely. There is no `infra/websocket/` any more.
+> The frame renders from `constants/dummy.ts`; the REST layer survives only for
+> the video widget's presign call. See documentation.md §16.
+
 ### Data flow
 
-> ⚠️ **CURRENTLY DISABLED.** WebSockets would not connect in the test
-> environment, so the two hook calls in `pages/home/index.tsx` are commented out
-> (not deleted) and a temporary `useApiProbe` call stands in their place. Nothing
-> imports `socket.ts`, so no connection is attempted, and `socket.io-client` +
-> `axios` are not in the bundle. The diagram below is the *intended* flow —
-> uncommenting four lines in `pages/home/index.tsx` restores it. See
-> [documentation.md §15](./documentation.md#15-current-state-socket-disabled-api-probe-in-its-place).
+> ⚠️ **NO SOCKET.** Socket.IO was removed at the project's request, so nothing
+> pushes a payload any more. `pages/home` reads the registration code from
+> `localStorage`, and **Show Content** renders `constants/dummy.ts` through the
+> real renderer. The diagram below is the *intended* flow for when a transport is
+> reintroduced.
 
 ```
-socket.ts (io(import.meta.env.VITE_WS_URL))
-      │
-      ▼
-useRegistrationCode()  ──emit──▶ requestRegistrationCode / updateSocketId
-      │                ◀──on──── registrationCode / overwriteRegistrationCode
-      │
-      ├──▶ pages/home/index.tsx  → displays the code
-      │
-      ▼
-usePlayerContent(code) ◀──on──── isPublished  ('Yes' triggers the fetch)
-      │
-      ▼
-api/client.ts (axios, withCredentials, VITE_API_URL)
-      ├─ POST /player-render/auth/requestToken   code + socket_id -> cookie
-      └─ GET  /player-render/content/getPlayerContent   (logged only, for now)
+constants/dummy.ts  ──▶  pages/home  ──[Show Content]──▶  pages/content
+                                                            │
+                                                  components/molecules/my-frame
+                                                            │  scales 1920x1080
+                                                            ▼
+                                                  pages/content/components/wrapper
+                                                            │  dispatches on content_type
+                                                            ▼
+                                                  components/atoms/object-*  (14 widgets)
 ```
 
-The wire contract mirrors `pt-player` (`player-pt`). **Do not rename the events,
-the endpoints, or reshape the payloads** — the backend is shared.
+The live REST path (`api/client.ts` → `requestPlayerToken` / `getPlayerContent`)
+has no trigger now that the socket is gone; only `getPlayerPresignUrl` is called,
+by the video widget, which falls back to the payload's own `VideoUrl` when it
+fails.
 
-Still unported: rendering the payload, `content_changes`, `checkCodeIsUsed` /
-`codeIsUsed`, `submitRegistrationCode`, `updateContentSyncProgress`,
-`request_latest_player_screen`, rotation, and the 5-minute refresh interval.
+The wire contract mirrors `pt-player` (`player-pt`). **Do not rename the
+endpoints or reshape the payloads** — the backend is shared, and
+`constants/dummy.ts` is a real capture of it.
+
+Still unported: a transport to receive the payload, scheduled playlists,
+`content_changes`, `checkCodeIsUsed` / `codeIsUsed`, `submitRegistrationCode`,
+`updateContentSyncProgress`, `request_latest_player_screen`, screen rotation, and
+the 5-minute refresh interval.
 
 ⚠️ **The REST API only answers origins on the backend's CORS allow-list.** The
-LAN URL the TVs use is not one of them, so the socket works and the API does
-not. Read [documentation.md §14](./documentation.md#14-the-player-api-and-the-cors-allow-list)
+LAN URL the TVs use is not one of them. Read
+[documentation.md §14](./documentation.md#14-the-player-api-and-the-cors-allow-list)
 before debugging an API failure — it is usually not this repo.
 
 ---
