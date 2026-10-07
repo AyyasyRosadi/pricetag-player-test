@@ -301,6 +301,29 @@ dependency upgrade.
     that plays the gap and wins by source order. Measure the rendered box
     (`getBoundingClientRect`) rather than reading the stylesheet — both bugs were
     only visible as a card a few pixels short.
+14. **`additionalLegacyPolyfills` DOES NOT WORK for a DOM API, and fails
+    silently.** Two independent reasons:
+
+    - Polyfill packages commonly ship a UMD `main` that assigns the global and an
+      ESM `module` that only exports the class. Vite resolves `module` first, so
+      importing the package for side effects installs nothing.
+      `resize-observer-polyfill` is exactly this, and its ESM default export even
+      prefers the native implementation when present.
+    - The polyfill chunk is built with @vitejs/plugin-legacy's **own** root and
+      `configFile: false`, so the `@` alias, relative specifiers and
+      root-absolute specifiers all fail with `UNRESOLVED_IMPORT`. Only bare
+      node_modules specifiers resolve — which reason one rules out.
+
+    Fix: assign the global in a module under `src/polyfills/`, imported by
+    `src/main.tsx`. **MUST NOT** rely on `additionalLegacyPolyfills` for a web
+    API. See [documentation.md §17](./documentation.md#17-the-blank-screen-bug-additionallegacypolyfills-does-not-work).
+15. **`check:tv` and `check:bundle` cannot see runtime API gaps.** Both pass on
+    code that throws on the TV. When something works on the laptop and fails on
+    the TV, **MUST** run `npm run probe:legacy` and read the error rather than
+    reasoning from the source. `ResizeObserver` (Chromium 64) is required by
+    **two** modules here — the frame canvas and `react-fast-marquee` — so the
+    `.flat()`/`.at()`-style source scans will never flag an unguarded
+    `new ResizeObserver(...)` inside a dependency.
 
 ---
 

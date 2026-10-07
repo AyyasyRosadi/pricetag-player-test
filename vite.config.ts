@@ -39,14 +39,18 @@ export default defineConfig({
       // Web platform APIs that Chromium 47 lacks are NOT detected
       // automatically, so the ones the ported widgets need are listed here.
       //
-      // ResizeObserver (Chromium 64) is used by the frame canvas
-      // (`components/molecules/my-frame`) to re-measure on layout changes.
-      // Without this the canvas throws on first paint on both 2017 TVs.
+      // ResizeObserver (Chromium 64) is required TWICE: by the frame canvas
+      // (`components/molecules/my-frame`) and by `react-fast-marquee`, which the
+      // running-text widget renders. Both call `new ResizeObserver(...)`
+      // unguarded, so without it the frame throws `ReferenceError` on first
+      // paint — a blank white screen on the TV while a desktop browser is fine.
       //
-      // Common candidates not needed yet: IntersectionObserver (Chromium 51),
-      // AbortController (Chromium 66), Web Animations `Element.animate`
-      // (Chromium 84).
-      additionalLegacyPolyfills: ['resize-observer-polyfill'],
+      // It is NOT installed from here. `additionalLegacyPolyfills` builds this
+      // chunk with the plugin's own `root` and `configFile: false`, so only bare
+      // node_modules specifiers resolve — and naming `resize-observer-polyfill`
+      // installs nothing anyway, because its ESM build merely exports the class.
+      // The global is assigned in `src/polyfills/resizeObserver.ts`, imported by
+      // `src/main.tsx`; read that file before touching this.
     }),
   ],
   resolve: {

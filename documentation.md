@@ -137,14 +137,22 @@ That covers JavaScript the compiler can see. It does **not** cover:
 - anything reached through a computed property
 - anything inside a dependency loaded at runtime
 
-Those must be declared in `vite.config.ts`:
+Those need a **global assignment from application code**, in a module under
+`src/polyfills/` imported by `src/main.tsx`:
 
 ```ts
-legacy({
-  targets: LEGACY_TARGETS,
-  additionalLegacyPolyfills: ['resize-observer-polyfill'],
-})
+// src/polyfills/resizeObserver.ts
+import ResizeObserverPolyfill from 'resize-observer-polyfill'
+
+if (typeof window !== 'undefined' && !window.ResizeObserver) {
+  window.ResizeObserver = ResizeObserverPolyfill
+}
 ```
+
+⚠️ **Do not use `additionalLegacyPolyfills` for this.** It builds, and the
+package name shows up in `polyfills-legacy.js`, but it installs nothing — and it
+fails *silently*. Read §17 before trying; this cost a real blank-screen bug on
+the LG TV.
 
 ### 4.3 CSS — two passes
 
@@ -892,10 +900,12 @@ Loading video…  ~  Matoa KG  ~  225.000  ~  / Kg  ~  10 October 2026
 | `resize-observer-polyfill` | devDependency | supplies `ResizeObserver` for the legacy bundle only |
 
 `ResizeObserver` is Chromium 64+, and it is required **twice**: by the canvas and
-by `react-fast-marquee`. It is provided through `additionalLegacyPolyfills` in
-`vite.config.ts`, which lands in the `polyfills-legacy` chunk that loads before
-the app. Both call sites carry a `tv-compat-allow` marker so `check:tv` does not
-re-report them.
+by `react-fast-marquee`. Both call sites carry a `tv-compat-allow` marker so
+`check:tv` does not re-report them.
+
+⚠️ **It is NOT installed via `additionalLegacyPolyfills`** — that approach builds
+and appears to work but installs nothing. See §17; this was the cause of a real
+blank-screen bug on the LG TV.
 
 Bundle cost of the whole layer:
 
@@ -945,3 +955,91 @@ not match. To make it fully offline-safe, delete the
 `toggle-fullscreen` (a HeroUI button) and `my-autoscale-card` (a CMS preview
 helper) — neither is a frame widget, and both would need HeroUI/Tailwind. Also
 not ported: the scheduler, screen rotation, and the content-diff/watchdog logic.
+
+---
+
+## 17. The blank-screen bug: `additionalLegacyPolyfills` does not work
+
+**Symptom.** After clicking **Show Content**, the LG TV showed a blank white
+screen. The laptop was fine.
+
+**Cause.** `ResizeObserver is not defined`, thrown during the first effect of
+`MyFrame`. React unmounted the tree, so nothing rendered. `ResizeObserver` is
+Chromium 64+; the LG (webOS 3.5) is Chromium 53. Modern desktop Chrome has it
+natively, which is why the laptop never reproduced it.
+
+The configured fix — `additionalLegacyPolyfills: ['resize-observer-polyfill']` —
+**did nothing, and did so silently.** It is broken for two independent reasons:
+
+1. **The package does not self-install.** It ships two builds:
+
+   | field | file | behaviour |
+   | --- | --- | --- |
+   | `main` | `dist/ResizeObserver.js` | UMD — assigns `window.ResizeObserver` |
+   | `module` | `dist/ResizeObserver.es.js` | ESM — only `export default`s the class |
+
+   Vite resolves `module` first, so importing the package for its side effects
+   installs nothing. Its ESM default export even prefers the native
+   implementation when one exists — it was never designed to patch a global.
+   The UMD build does not rescue it either: bundled as CJS, its
+   `typeof module !== 'undefined'` branch wins and it exports instead of
+   assigning.
+
+2. **`additionalLegacyPolyfills` cannot reference a local module.** That chunk is
+   built by `buildPolyfillChunk()` in `@vitejs/plugin-legacy` with
+   `root: <the plugin's own directory>` and `configFile: false`. The project's
+   `@` alias, relative specifiers **and** root-absolute specifiers all fail with
+   `UNRESOLVED_IMPORT … Module not found`. Only bare node_modules specifiers
+   resolve — and reason 1 rules those out.
+
+**Fix.** Assign the global from application code, where Vite's resolver behaves
+normally: `src/polyfills/resizeObserver.ts`, imported first by `src/main.tsx`.
+The guard makes it a no-op on modern browsers. Cost: ~12 kB gzipped in the
+*modern* bundle, offset almost exactly by the dead import leaving the polyfill
+chunk.
+
+### `npm run probe:legacy` — reproducing TV-only failures
+
+`check:tv` (static source scan) and `check:bundle` (AST scan) both pass on code
+that still breaks on a TV, because neither executes anything. Runtime API gaps
+are invisible to them.
+
+`scripts/make-legacy-probe.mjs` closes that gap. It writes
+`dist/_legacy-probe.html`, a page that:
+
+1. **deletes the APIs Chromium 53 does not have** — `ResizeObserver`,
+   `Object.entries`, `Promise.prototype.finally`, `String.prototype.padStart`,
+   `Array.prototype.flat`, `AbortController`, `globalThis`, `visualViewport`, …
+2. loads the **legacy** polyfill chunk and entry (with `nomodule` stripped, so a
+   modern Chrome will run them — this is the only way to exercise the legacy path
+   without a TV);
+3. clicks **Show Content**, then reports uncaught errors and rendered text.
+
+The deletion happens *before* the polyfill chunk, exactly as on a real TV, so
+whatever core-js restores is what the TV would have had.
+
+```
+npm run build
+npm run serve:tv          # in another shell
+npm run probe:legacy
+chrome --headless=new --dump-dom http://172.16.30.107:4173/_legacy-probe.html
+```
+
+Current output — the second line is the one that matters:
+
+```
+after polyfill chunk : {"ResizeObserver":"undefined", ...}
+after app entry      : {"ResizeObserver":"function"}
+
+ERRORS (0):
+
+RENDERED TEXT: Loading video…  ~  Matoa KG  ~  225.000  ~  / Kg
+             ~  10 October 2026  ~  Special Price Until:  ~  Close content
+```
+
+> The early snapshot being `undefined` is expected and is *not* a failure: the
+> polyfill is installed by the app entry, which runs after the chunk that
+> snapshot is taken in. The final line is what proves the fix.
+
+**Rule of thumb:** when something works on the laptop and fails on a TV, do not
+reason about it from the source — run `probe:legacy` and look at the error.

@@ -44,11 +44,21 @@ const JS_RULES = [
   { re: /\bWeakRef\b|\bFinalizationRegistry\b/, msg: 'WeakRef/FinalizationRegistry are Chromium 84+.' },
 ]
 
-/** Web APIs missing on the TVs; these need `additionalLegacyPolyfills`. */
+/**
+ * Web APIs missing on the TVs.
+ *
+ * ⚠️ Do NOT reach for `additionalLegacyPolyfills` as the first fix. It builds
+ * its chunk with @vitejs/plugin-legacy's OWN root and `configFile: false`, so
+ * the `@` alias, relative specifiers and root-absolute specifiers all fail to
+ * resolve — and most polyfill packages only `export` their implementation, so a
+ * bare package name installs nothing at all (silently). Assign the global from
+ * a module under `src/polyfills/`, imported by `src/main.tsx`. See
+ * `src/polyfills/resizeObserver.ts` for the full write-up.
+ */
 const JS_WARN_RULES = [
-  { re: /\bResizeObserver\b/, msg: 'ResizeObserver is Chromium 64+. Add a polyfill to `additionalLegacyPolyfills` in vite.config.ts.' },
-  { re: /\bIntersectionObserver\b/, msg: 'IntersectionObserver is Chromium 51+. Add a polyfill to `additionalLegacyPolyfills`.' },
-  { re: /\bAbortController\b|\bAbortSignal\b/, msg: 'AbortController is Chromium 66+. Add a polyfill if you rely on it.' },
+  { re: /\bResizeObserver\b/, msg: 'ResizeObserver is Chromium 64+. Install it globally from src/polyfills/ (see that file) — additionalLegacyPolyfills does NOT work for this.' },
+  { re: /\bIntersectionObserver\b/, msg: 'IntersectionObserver is Chromium 51+. Install it globally from src/polyfills/ — additionalLegacyPolyfills does NOT work for this.' },
+  { re: /\bAbortController\b|\bAbortSignal\b/, msg: 'AbortController is Chromium 66+. Install it globally from src/polyfills/ if you rely on it.' },
   { re: /\bqueueMicrotask\b/, msg: 'queueMicrotask is Chromium 71+. core-js usually covers it — confirm in dist/.' },
   { re: /\.getAnimations\s*\(|\bAnimation\b/, msg: 'The fuller Web Animations API (getAnimations, Animation objects) is Chromium 84+. Element.animate() alone is older, but prefer CSS transitions on the TVs.' },
   { re: /\brequestIdleCallback\b/, msg: 'requestIdleCallback is Chromium 47+ (borderline). Prefer requestAnimationFrame.' },
@@ -79,6 +89,15 @@ const CSS_WARN_RULES = [
 ]
 
 const CSS_DECL_RE = /([-a-zA-Z][\w-]*)\s*:\s*([^;{}]*)/g
+
+/**
+ * Directories that are exempt from the Web-API warnings.
+ *
+ * `src/polyfills/` is BY DEFINITION the place where APIs the TVs lack are
+ * referenced — that is what a polyfill does — so flagging them there is noise.
+ * The JS-syntax rules still apply to these files.
+ */
+const POLYFILL_DIR = 'polyfills'
 
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {
@@ -245,7 +264,10 @@ function main() {
     } else if (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.mjs') {
       const scannable = stripComments(raw, 'js')
       scanRules(raw, scannable, JS_RULES, 'error', rel, findings)
-      scanRules(raw, scannable, JS_WARN_RULES, 'warn', rel, findings)
+      // A polyfill module is where the missing API is *supposed* to appear.
+      if (!rel.includes(POLYFILL_DIR)) {
+        scanRules(raw, scannable, JS_WARN_RULES, 'warn', rel, findings)
+      }
       scanSvgUse(raw, scannable, rel, findings)
     } else if (ext === '.html') {
       const scannable = stripComments(raw, 'html')

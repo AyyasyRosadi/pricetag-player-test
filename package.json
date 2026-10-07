@@ -15,7 +15,8 @@
     "cert:generate": "mkcert -cert-file pt-player.mdevoffice.net.pem -key-file pt-player.mdevoffice.net-key.pem pt-player.mdevoffice.net",
     "lint": "oxlint",
     "check:tv": "node scripts/check-tv-compat.mjs",
-    "check:bundle": "node scripts/check-legacy-bundle.mjs"
+    "check:bundle": "node scripts/check-legacy-bundle.mjs",
+    "probe:legacy": "node scripts/make-legacy-probe.mjs"
   },
   "dependencies": {
     "axios": "^1.13.2",
