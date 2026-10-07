@@ -81,11 +81,14 @@ npm run check:tv && npm run build
 | Script | What it does |
 | --- | --- |
 | `npm run dev` | Vite dev server. Native ESM + HMR. **Cannot be used to test TVs.** |
-| `npm run build` | `tsc -b && vite build` → `dist/`. Emits modern + legacy bundles. ~10 s warm, ~60 s cold. |
+| `npm run build` | `tsc -b && vite build` → `dist/`. Emits modern + legacy bundles. ~10–20 s warm, several minutes cold. |
 | `npm run preview` | Serves `dist/`. **This is the only local way to exercise the TV path.** |
 | `npm run serve:tv` | Same as `preview`, but bound to `0.0.0.0:4173` so a TV on the LAN can reach `http://<your-lan-ip>:4173`. |
+| `npm run serve:https` | HTTPS on `0.0.0.0:3030` at `https://pt-player.mdevoffice.net:3030` — same domain and port as `player-pt`. Desktop verification only; see [§13](#13-https-mode). |
+| `npm run cert:generate` | (Re)creates the local mkcert leaf for `pt-player.mdevoffice.net`. Needs [mkcert](https://github.com/FiloSottile/mkcert). |
 | `npm run lint` | oxlint (`.oxlintrc.json`) |
-| `npm run check:tv` | Static smart-TV compatibility guard (`scripts/check-tv-compat.mjs`) |
+| `npm run check:tv` | Static **source** guard (`scripts/check-tv-compat.mjs`) |
+| `npm run check:bundle` | Parses the built **legacy** bundles and fails on any post-ES2015 syntax (`scripts/check-legacy-bundle.mjs`). Run after `build`. |
 
 ---
 
@@ -199,21 +202,34 @@ package.json               browserslist (autoprefixer) + scripts
 postcss.config.js          autoprefixer
 tsconfig*.json             TypeScript project references (app / node)
 .oxlintrc.json             Lint configuration
+.env / .env.example        VITE_WS_URL — the Socket.IO origin
+pt-player.mdevoffice.net.pem       TLS leaf for HTTPS mode (git-ignored)
+pt-player.mdevoffice.net-key.pem   Its private key (git-ignored — never commit)
 rules.md                   MUST / MUST NOT browser-support contract
 documentation.md           This file
 agent.md                   Guidance for AI agents
 scripts/
-  check-tv-compat.mjs      Static compatibility guard
+  check-tv-compat.mjs      Static source guard
+  check-legacy-bundle.mjs  Parses the built legacy bundles
+  serve-https.mjs          HTTPS server on :3030 (domain parity with player-pt)
 src/
   main.tsx                 createRoot bootstrap
   App.tsx                  App shell — renders the current page
-  index.css                Global theme (literal values only)
+  index.css                Global styles (literal values only)
+  vite-env.d.ts            Types for `import.meta.env`
+  hooks/
+    useRegistrationCode.ts Registration handshake (phase 1 of the pt-player port)
+    useFullscreen.ts       Fullscreen API + `webkit` fallback
+  infra/websocket/
+    socket.ts              The single shared Socket.IO connection
+  utils/
+    storage.ts             localStorage wrappers that never throw
   pages/
-    home/
-      index.tsx            Home — image + video smoke test
-      index.css            Page styles
+    home/                  Registration screen (default page)
+    media-smoke/           Image/video sanity check, not rendered by default
 public/
   favicon.svg              Copied to dist/ verbatim
+  images/                  icon.png + title.svg (brand assets)
 ```
 
 Anything in `public/` is copied to `dist/` unchanged and must be referenced by
@@ -281,9 +297,20 @@ app is packaged locally, confirm that relative asset URLs still resolve.
 2. Colours and borders are present (proves no `var()` reached the TV).
 3. Spacing between stacked/rowed elements (proves no flex `gap` was relied on).
 4. Every focusable element shows a visible focus ring under D-pad navigation.
-5. The image renders and the video actually plays (proves the remote media is
-   reachable and the H.264/MP4 codec is supported by the TV).
-6. 1920×1080 layout, including any part of the UI beyond 1024 px wide.
+5. 1920×1080 layout, including any part of the UI beyond 1024 px wide.
+
+For the registration screen specifically:
+
+6. The status line reads **Connected** and names the expected host. If it says
+   *Offline — retrying*, the TV cannot reach `VITE_WS_URL`: check the TV's
+   network, then that the host is reachable from the TV's subnet.
+7. A code appears. *"Waiting Registration Code"* means the socket connected but
+   no operator has claimed the screen yet — that is a backend state, not a bug.
+8. The code survives a reload (it is persisted in `localStorage`).
+9. Panels rendered by the media smoke page (`src/pages/media-smoke`) load their
+   remote image/video, proving the H.264/MP4 codec and outbound requests work.
+   Remember those URLs are hotlinks and may be blocked by referrer checks —
+   localise them before shipping.
 
 ---
 
@@ -342,8 +369,13 @@ Checklist when the TV cannot connect:
 | Icons missing | `<use href>` without `xlink:href`, `file://`, wrong MIME type, or cross-origin | See `rules.md` §5 |
 | Focus is invisible | `:focus-visible` used as the only focus style | Style `:focus` |
 | Works in `dev`, broken in `preview` | You are testing the legacy bundle for the first time | Debug `dist/`, not the dev server |
-| Build is slow | The legacy Babel pass | Expected (~60 s); not a hang |
+| Build is slow | The legacy Babel pass, now including socket.io | Expected (minutes cold); not a hang |
 | `check:tv` fails on a line you accepted | Deliberate deviation | Add `tv-compat-allow: <reason>` on/above the line |
+| Status line stuck on *Offline — retrying* | TV cannot reach `VITE_WS_URL` | Check the TV's network, then that the host resolves and answers from that subnet |
+| Socket connects but never a code | Backend has not assigned one | Expected: the screen shows *Waiting Registration Code* until an operator claims it |
+| Two codes for one screen | An extra `connect`/`reconnect` listener | Bind only `socket.on('connect')`, never Manager `reconnect` too |
+| Console: `VITE_WS_URL is not set` | `.env` missing when the build ran | Restore `.env` (or make `.env.local`) and rebuild — Vite inlines the value at build time |
+| Code resets on every reload | `localStorage` blocked by the TV | Expected on some firmware; the screen re-registers each boot |
 
 ---
 
@@ -365,3 +397,219 @@ rm src/__probe.ts
 The checker also understands the `tv-compat-allow` escape hatch and blanks out
 comments before scanning, so prose that merely *mentions* a banned feature is not
 reported.
+
+`check:bundle` is the counterpart for the artefact — it parses
+`dist/*legacy*.js` and reports any construct Chromium 47 cannot execute. The two
+are complementary: `check:tv` sees your source, `check:bundle` sees what the TVs
+actually download, including everything a dependency dragged in.
+
+---
+
+## 12. Socket.IO and the registration flow
+
+Phase 1 of the port from `pt-player` (`../player-pt`). The registration code is
+what identifies a screen to the CMS; until an operator claims it, the screen
+shows the code and nothing else.
+
+### Configuration
+
+| Variable | Where | Meaning |
+| --- | --- | --- |
+| `VITE_WS_URL` | `.env` (override in `.env.local`) | Socket.IO origin, e.g. `https://pricetag-stag2.mdevoffice.net` |
+
+Only `VITE_`-prefixed keys reach the browser. Vite **inlines them into the
+bundle at build time**, so they are visible to anyone who downloads the player —
+never put a credential there. `VITE_WS_URL` must be a bare origin, without a
+path, because socket.io-client appends `path: '/socket.io'` itself.
+
+### The connection
+
+`src/infra/websocket/socket.ts` creates one `io()` at module scope, so the whole
+app shares a single connection and re-renders can never open a second one.
+
+```ts
+io(VITE_WS_URL, {
+  transports: ['websocket'],   // the backend rejects polling ("Transport unknown")
+  path: '/socket.io',
+  withCredentials: true,       // cookies ride along on the handshake
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 5000,
+})
+```
+
+On a TV this is also the cheapest option: skipping the HTTP long-polling upgrade
+avoids several XHRs in flight, and Chromium 47 has a native `WebSocket`.
+
+### The handshake
+
+```
+              ┌──────────────────────────────────────────────┐
+   no code ──▶│ emit requestRegistrationCode(additionalInfo) │
+              └──────────────────────────────────────────────┘
+              ┌──────────────────────────────────────────────┐
+  has code ──▶│ emit updateSocketId(code, additionalInfo)    │
+              └──────────────────────────────────────────────┘
+
+   on registrationCode          (code)  → persist + display, only if none held
+   on overwriteRegistrationCode (code)  → persist + display + re-emit updateSocketId
+```
+
+`additionalInfo` is `{ width, height, devicePixelRatio, orientation }` read from
+`window.screen`. The backend uses it to size the layout it later pushes, so the
+field names are part of the wire contract.
+
+Two deliberate divergences from `pt-player`, both fixes rather than behaviour
+changes:
+
+1. **Only `socket.on('connect')` is bound**, not Manager `reconnect` as well.
+   socket.io re-emits `connect` after every successful reconnection, so binding
+   both fires `requestRegistrationCode` twice and can reserve two codes for one
+   screen.
+2. **Listeners are registered once per mount**, reading `localStorage` inside the
+   handler instead of closing over state. `pt-player` re-runs its whole effect on
+   every code change, tearing down handlers mid-handshake.
+
+### State
+
+The code is kept in React state *and* `localStorage` (`registrationCode`). A code
+already held always wins over one the server sends, so a reconnect cannot
+overwrite an operator's assignment. Clearing `localStorage` is how you force a
+screen to re-register.
+
+> The hook returns `{ registrationCode, isConnected }`. `isConnected` feeds the
+> status line on the registration card — a TV has no devtools, so "did the socket
+> connect, and to what host?" is the only question worth answering on the glass.
+
+### Not ported yet
+
+Everything that depends on a published layout stays out until this is stable:
+`isPublished`, `content_changes`, `checkCodeIsUsed` / `codeIsUsed`,
+`submitRegistrationCode`, `updateContentSyncProgress`,
+`request_latest_player_screen`, the `player-render/auth/requestToken` call,
+player content fetching, and all rotation handling.
+
+### Verifying the backend by hand
+
+Connect without registering anything (this creates no screen):
+
+```sh
+node -e "
+const { io } = require('socket.io-client');
+const s = io('https://pricetag-stag2.mdevoffice.net', { transports:['websocket'], path:'/socket.io' });
+s.on('connect', () => console.log('connected', s.id, s.io.engine.transport.name));
+s.on('connect_error', (e) => console.log('error', e.message));
+setTimeout(() => process.exit(0), 8000);
+"
+```
+
+Expect `connected <id> websocket`. To exercise the full registration handshake,
+add `s.on('connect', () => s.emit('requestRegistrationCode', JSON.stringify({ width: 1920, height: 1080, devicePixelRatio: 1, orientation: 'landscape-primary' })))`
+— but note that **reserves a real screen** on the backend, so open the player on
+the TV instead when you want an end-to-end check.
+
+---
+
+## 13. HTTPS mode
+
+`npm run serve:https` runs the built player over TLS at the **same domain and
+port as `player-pt`**:
+
+```
+https://pt-player.mdevoffice.net:3030
+```
+
+| | `player-pt` | this repo |
+| --- | --- | --- |
+| Domain | `pt-player.mdevoffice.net` | same |
+| HTTPS port | `3030` (`server.ts`) | same |
+| Plain port | `2020` (`next dev` / `next start`) | `4173` (`serve:tv`) |
+| Certificate | mkcert leaf, `*.pem` in the project root | same, but generated here |
+
+### Setup
+
+```sh
+npm run cert:generate   # mkcert leaf -> pt-player.mdevoffice.net.pem (+ -key.pem)
+npm run build
+npm run serve:https
+```
+
+`cert:generate` wraps:
+
+```sh
+mkcert -cert-file pt-player.mdevoffice.net.pem \
+       -key-file pt-player.mdevoffice.net-key.pem \
+       pt-player.mdevoffice.net
+```
+
+Requires [mkcert](https://github.com/FiloSottile/mkcert) and its CA installed
+(`mkcert -install`). **The `.pem` files are git-ignored** — `*.pem` and `*.key`
+are in `.gitignore`; never commit a private key. Anyone can regenerate the pair
+in one command, so there is nothing to share.
+
+### How the name resolves
+
+`pt-player.mdevoffice.net` has **no public DNS record**. It is wired up in
+`C:\Windows\System32\drivers\etc\hosts` as `127.0.0.1`, and the certificate is an
+mkcert leaf whose CA is trusted in this machine's *user* root store. Both halves
+are machine-local, which is exactly why the URL resolves and validates here.
+
+### What HTTPS mode is — and is not — for
+
+**It is for verifying from this PC.** Specifically it gives you a *secure
+context* and a production-shaped `Origin`, which matters because the player talks
+to a `wss://` backend.
+
+**It is not usable from a 2017 TV**, for two independent reasons:
+
+1. TV browsers resolve DNS themselves, so the hosts entry does not apply, and
+   there is no public A record for the name.
+2. The TVs do not have the mkcert CA in their trust stores, so the certificate
+   fails validation and the TV refuses the page.
+
+For the TVs, keep using `npm run build && npm run serve:tv` and open
+`http://<your-lan-ip>:4173`. If you ever need TLS *on the TV*, it will have to be
+a certificate the TV trusts (a real one for a name that genuinely resolves to
+this machine) — not mkcert.
+
+The certificate is issued for the hostname only, with no IP SAN, so
+`https://172.16.30.107:3030` fails validation. Always use the name.
+
+### Host allow-listing
+
+Vite rejects requests whose `Host` header it does not recognise (DNS-rebinding
+protection). Its built-in allowlist covers `localhost` and any IP literal — which
+is why the LAN path works untouched — but a hostname has to be declared:
+
+```ts
+// vite.config.ts
+preview: {
+  allowedHosts: ['pt-player.mdevoffice.net'],
+}
+```
+
+### Verifying it by hand
+
+Windows `curl` uses Schannel, which reports
+`CERT_TRUST_REVOCATION_STATUS_UNKNOWN` for a local CA because it cannot reach a
+CRL. That is a revocation-check quirk, not a bad certificate. Verify with either:
+
+```sh
+CA="C:/Users/ayyas/AppData/Local/mkcert/rootCA.pem"
+
+# Schannel: skip only the revocation check
+curl --ssl-no-revoke --cacert "$CA" -o /dev/null -w '%{http_code}\n' \
+     https://pt-player.mdevoffice.net:3030/
+
+# OpenSSL: full chain validation
+echo | openssl s_client -connect pt-player.mdevoffice.net:3030 \
+  -servername pt-player.mdevoffice.net -CAfile "$CA" 2>&1 \
+  | grep 'Verify return code'
+```
+
+The first prints `200`; the second prints `Verify return code: 0 (ok)`.
+
+> Changing `HTTPS_PORT` or `HTTPS_DOMAIN` in the environment is supported, but
+> the certificate must then match the domain — regenerate it with
+> `cert:generate` after editing the domain.

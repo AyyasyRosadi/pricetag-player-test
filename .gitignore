@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Local TLS material for `npm run serve:https` (mkcert leaf + private key).
+# NEVER commit these — `npm run cert:generate` recreates them on any machine
+# that has mkcert installed.
+*.pem
+*.key
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -22,3 +28,4 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+*.env

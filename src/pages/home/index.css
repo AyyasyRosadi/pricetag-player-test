@@ -1,93 +1,270 @@
 /*
- * Home — media smoke test.
+ * Registration card.
  *
- * Written for the 2017 TV engines (LG webOS 3.5 = Chromium 53, Samsung Tizen
- * 3.0 = Chromium 47), so it follows rules.md:
+ * 1:1 port of `pt-player`'s `src/page/home` default variant. Every number below
+ * is the Tailwind class from that file resolved to pixels (Tailwind v4: 1 unit =
+ * 4px, `w-lg` = 32rem, `rounded-4xl` = 2rem, `rounded-3xl` = 1.5rem), then
+ * verified against a screenshot of the running player at 125% scale.
  *
- *   - the spacing between the two panels is an adjacent-sibling `margin`, not
- *     flexbox `gap` (gap needs Chromium 84 and is silently ignored on the TVs);
- *   - the focus ring hangs off `:focus`, because the TVs drop every
- *     `:focus-visible` rule (Chromium 86+) and a D-pad user still needs to see
- *     what is selected;
- *   - colours and sizes are literals — no `var()` (Chromium 49+);
- *   - no `aspect-ratio` (Chromium 88); fixed height + `object-fit` instead.
+ * Colours come from `pt-player/tailwind.config.ts`, not from the brand SVG:
+ *   gray-200  #e5e7eb   page background          (Tailwind default)
+ *   primary   #0963a0   solid button, bordered button
+ *   secondary #4681f4   "Screen Registration Code" + the code itself
+ *   orange-500 #ff6900  the code box border      (Tailwind v4 default)
+ *
+ * TV constraints from rules.md still apply: no flexbox `gap` (margins instead),
+ * no `var()`, no `svh`, and focus on `:focus` rather than `:focus-visible`.
  */
 
-.home {
+.registration {
   box-sizing: border-box;
-  width: 100%;
-  padding: 32px;
-  text-align: left;
-}
-
-.home__title {
-  font-size: 28px;
-  font-weight: 500;
-  line-height: 120%;
-  color: #08060d;
-  margin: 0 0 8px;
-}
-
-.home__hint {
-  font-size: 16px;
-  line-height: 145%;
-  color: #6b6375;
-  margin: 0 0 24px;
-}
-
-.media-row {
   display: flex;
-  flex-direction: row;
-  align-items: stretch;
+  align-items: center;
+  justify-content: center;
   width: 100%;
+  min-height: 100vh;
+  background: #e5e7eb;
 }
 
-.media-row__panel {
-  flex: 1 1 0;
-  /* Flex items refuse to shrink below their content's intrinsic width without
-     this, which makes the video panel overflow instead of sharing the row. */
-  min-width: 0;
-}
-
-/* Stand-in for `gap: 24px`. */
-.media-row__panel + .media-row__panel {
-  margin-left: 24px;
-}
-
-.media-row__media {
-  display: block;
+/* Card — w-lg bg-white px-4 py-10 rounded-4xl flex flex-col gap-2 items-center */
+.registration__card {
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   width: 100%;
-  height: 480px;
-  /* `object-fit` is Chromium 32+, so it is safe on the TVs. */
-  object-fit: cover;
-  border: 1px solid #e5e4e7;
-  border-radius: 8px;
-  background: #f4f3ec;
+  max-width: 512px;
+  padding: 40px 16px;
+  border-radius: 32px;
+  background: #ffffff;
+  text-align: center;
+  /* HeroUI's <Card> defaults to `shadow` = "md", i.e. `shadow-medium`, and the
+     design keeps it. Copied verbatim from @heroui/theme's light-layout
+     boxShadow.medium. Dropping it is very visible: the soft halo is what
+     separates a white card from a #e5e7eb page. */
+  box-shadow:
+    0 0 15px 0 rgba(0, 0, 0, 0.03),
+    0 2px 30px 0 rgba(0, 0, 0, 0.08),
+    0 0 1px 0 rgba(0, 0, 0, 0.3);
+}
+
+/* `gap-2` as margins — flexbox gap is Chromium 84+. */
+.registration__card > * + * {
+  margin-top: 8px;
+}
+
+/* Brand row — flex gap-3 items-center */
+.registration__brand {
+  display: flex;
+  align-items: center;
+}
+
+/* w-16 h-16 */
+.registration__icon {
+  width: 64px;
+  height: 64px;
+}
+
+/* w-80 h-20, with `gap-3` between it and the icon */
+.registration__logo {
+  width: 320px;
+  height: 80px;
+  margin-left: 12px;
+}
+
+/* text-center mb-10 */
+.registration__title-wrap {
+  margin-bottom: 40px;
+}
+
+/* text-3xl — 30px / 36px, weight inherited (500). */
+.registration__title {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 36px;
+  color: #000000;
+}
+
+/* text-center text-xl — two lines of 20px / 28px.
+   Deliberately no `margin` shorthand here: `margin: 0` would tie with the
+   `> * + *` gap rule above on specificity and win by source order, silently
+   swallowing the 8px. The element is a <div>, so it has no UA margin to reset. */
+.registration__lead {
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 28px;
+  color: #000000;
+}
+
+.registration__lead-line {
+  margin: 0;
+}
+
+/* text-secondary */
+.registration__lead-accent {
+  margin: 0;
+  color: #4681f4;
+}
+
+/*
+ * Code box — border border-orange-500 rounded-3xl h-16 w-[90%] p-10.
+ *
+ * `h-16` is 64px but `p-10` is 40px top and bottom. Under `box-sizing:
+ * border-box` the content box is floored at zero, so the used height becomes
+ * padding + border = 82px and the text overflows its content box, vertically
+ * centred by flex. That is exactly how the Next.js player renders it — 82px is
+ * what the screenshot shows — so the collapse is reproduced rather than
+ * "fixed" with an explicit height.
+ */
+.registration__code {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 90%;
+  height: 64px;
+  padding: 40px;
+  border: 1px solid #ff6900;
+  border-radius: 24px;
+  background: #ffffff;
+  color: #4681f4;
+  font-size: 48px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.1em;
+  text-align: center;
+  word-break: break-all;
+}
+
+/* "Waiting Registration Code" is a sentence, not a code — the original drops it
+   to text-xl so the card does not look broken. */
+.registration__code--waiting {
+  font-size: 20px;
+  line-height: 28px;
+}
+
+/* Edit mode — w-[90%] h-10 rounded-3xl text-5xl border border-orange-500
+   bg-white px-4 py-10 text-secondary text-center. Same 82px collapse as above. */
+.registration__code--input {
+  outline: none;
+  font-family: inherit;
+}
+
+/*
+ * `pt-player` sets `outline-none` on this input. rules.md §4.2 forbids removing
+ * focus indication outright, and this field is only reachable on desktop (a TV
+ * has no on-screen keyboard), so a ring is restored here. The resting look is
+ * unchanged.
+ */
+.registration__code--input:focus {
+  outline: 2px solid #ff6900;
+  outline-offset: 2px;
+}
+
+/*
+ * flex flex-col gap-3 w-[80%] mt-12
+ *
+ * `mt-12` is 48px, but in the original it stacks ON TOP of the parent's 8px
+ * `gap-2` — flexbox adds gap and margin, it does not choose between them. Since
+ * the gap is emulated with `margin-top` here, the single declaration has to be
+ * the sum: 48 + 8 = 56px.
+ */
+.registration__actions {
+  display: flex;
+  flex-direction: column;
+  width: 80%;
+  margin-top: 56px;
+}
+
+.registration__actions > * + * {
+  margin-top: 12px;
+}
+
+/* Button size="lg" className="h-16", plus HeroUI's default medium radius. */
+.registration__button {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 64px;
+  padding: 0 16px;
+  border: 2px solid #0963a0;
+  border-radius: 12px;
+  background: #0963a0;
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* variant="bordered" color="primary" */
+.registration__button--bordered {
+  background: transparent;
+  color: #0963a0;
 }
 
 /* D-pad focus ring. A `:focus-visible` variant would be discarded wholesale by
    Chromium 47/53, leaving the viewer with no visible selection. */
-.media-row__media:focus {
-  outline: 3px solid #aa3bff;
+.registration__button:focus {
+  outline: 3px solid #0963a0;
   outline-offset: 2px;
 }
 
+/*
+ * Offline notice — not part of the pt-player design; it is pinned outside the
+ * card and only exists while the socket is down (see index.tsx). tv-compat-allow
+ * is not needed: it uses no banned feature.
+ */
+.registration__offline {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 8px;
+  margin: 0;
+  color: #b91c1c;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  word-break: break-all;
+}
+
 @media (max-width: 1024px) {
-  .home {
-    padding: 20px;
+  .registration__card {
+    padding: 24px 12px;
+    border-radius: 24px;
   }
 
-  .media-row {
-    flex-direction: column;
+  .registration__logo {
+    width: 220px;
+    height: 55px;
   }
 
-  .media-row__panel + .media-row__panel {
-    margin-left: 0;
-    margin-top: 20px;
+  .registration__title {
+    font-size: 22px;
+    line-height: 28px;
   }
 
-  .media-row__media {
-    height: 280px;
+  .registration__title-wrap {
+    margin-bottom: 24px;
+  }
+
+  .registration__code {
+    padding: 24px;
+    font-size: 32px;
+  }
+
+  .registration__code--waiting {
+    font-size: 18px;
+  }
+
+  .registration__actions {
+    margin-top: 32px;
+  }
+
+  .registration__button {
+    height: 56px;
+    font-size: 17px;
   }
 }

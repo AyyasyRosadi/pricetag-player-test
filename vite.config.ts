@@ -56,4 +56,12 @@ export default defineConfig({
     // unchanged. Those have to be avoided in source; see rules.md.
     cssTarget: 'chrome47',
   },
+  preview: {
+    // Vite validates the Host header to block DNS-rebinding. Its own allowlist
+    // covers `localhost` and any IP literal, which is why LAN access by IP works
+    // out of the box — but a hostname must be listed or every request 403s.
+    // `pt-player.mdevoffice.net` is wired to this machine through the hosts file
+    // (see `npm run serve:https`).
+    allowedHosts: ['pt-player.mdevoffice.net'],
+  },
 })

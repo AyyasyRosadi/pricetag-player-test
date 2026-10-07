@@ -31,40 +31,79 @@ The default Vite template assumptions are wrong for this project. Do not
 ```
 vite.config.ts          ← the compatibility core: Babel/core-js target + cssTarget
 package.json            ← browserslist (autoprefixer) + npm scripts
+.env / .env.example     ← VITE_WS_URL (Socket.IO origin); .env.local overrides
+<domain>.pem / -key.pem ← mkcert leaf for `serve:https` (git-ignored; NEVER commit)
 index.html              ← Vite entry; plugin-legacy rewrites it at build time
 scripts/
-  check-tv-compat.mjs   ← static TV-compatibility guard (`npm run check:tv`)
+  check-tv-compat.mjs     ← static source guard (`npm run check:tv`)
+  check-legacy-bundle.mjs ← verifies the shipped bundle (`npm run check:bundle`)
+  serve-https.mjs         ← HTTPS on :3030 at pt-player.mdevoffice.net
 src/
   main.tsx              ← createRoot bootstrap
   App.tsx               ← app shell; renders the current page
-  index.css             ← global theme (literal values only)
+  index.css             ← global styles (literal values only)
+  vite-env.d.ts         ← types for ImportMetaEnv
+  hooks/
+    useRegistrationCode.ts ← phase 1: Socket.IO registration handshake
+    useFullscreen.ts       ← Fullscreen API with the webkit fallback
+  infra/websocket/
+    socket.ts              ← the single shared Socket.IO connection
+  utils/storage.ts         ← localStorage wrappers (they catch — see rules.md §6.8)
   pages/
-    home/
-      index.tsx         ← Home — image + video smoke test
-      index.css         ← page styles
+    home/                  ← registration screen (the default page)
+    media-smoke/           ← manual image/video check, not rendered by default
 public/
   favicon.svg
+  images/                  ← icon.png + title.svg, brand assets
 rules.md                ← MUST / MUST NOT browser-support contract
 documentation.md        ← architecture, build, testing, troubleshooting
 ```
 
-Deliverable: `dist/` (git-ignored). There is no server component in this repo.
+Deliverable: `dist/` (git-ignored). The only server-side code is the local
+`scripts/serve-https.mjs` dev server — there is no application backend here.
+
+### Data flow
+
+```
+socket.ts (io(import.meta.env.VITE_WS_URL))
+      │
+      ▼
+useRegistrationCode()  ──emit──▶ requestRegistrationCode / updateSocketId
+      │                ◀──on──── registrationCode / overwriteRegistrationCode
+      ▼
+pages/home/index.tsx  → displays the code
+```
+
+The wire contract mirrors `pt-player` (`player-pt`). **Do not rename the events
+or reshape the payload** — the backend is shared. Anything that depends on a
+published layout (`isPublished`, `content_changes`, `checkCodeIsUsed`,
+`submitRegistrationCode`, `updateContentSyncProgress`, player content, rotation)
+is intentionally still unported.
 
 ---
 
 ## 3. Commands
 
 ```sh
-npm run dev        # modern browsers ONLY — HMR/ESM, unusable on a TV
-npm run check:tv   # static compatibility guard; fix every error
-npm run lint       # oxlint
-npm run build      # tsc -b && vite build -> dist/ (modern + legacy bundles)
-npm run preview    # serve dist/ — the only way to exercise the TV path
+npm run dev          # modern browsers ONLY — HMR/ESM, unusable on a TV
+npm run check:tv     # static source guard; fix every error
+npm run lint         # oxlint
+npm run build        # tsc -b && vite build -> dist/ (modern + legacy bundles)
+npm run check:bundle # parses dist/ legacy bundles; run after every build
+npm run preview      # serve dist/ — the only way to exercise the TV path
+npm run serve:tv     # same, bound to 0.0.0.0 so a TV on the LAN can load it
+npm run serve:https  # HTTPS :3030 at pt-player.mdevoffice.net (desktop only)
+npm run cert:generate # (re)create the mkcert leaf for `serve:https`
 ```
 
-`npm run build` is dominated by the legacy Babel pass: roughly 10 s with warm
-caches, up to about a minute on the first run after a clean install. That is
-expected, not a hang.
+`npm run build` is dominated by the legacy Babel pass: roughly 10–20 s with warm
+caches, and several minutes on a cold run now that `socket.io-client` is in the
+graph. That is expected, not a hang.
+
+`serve:https` gives a secure context and a production-shaped `Origin` for desktop
+verification. **A TV cannot use it** — `pt-player.mdevoffice.net` only resolves
+through this machine's hosts file and the mkcert CA is trusted only here. For the
+TVs use `serve:tv` over the LAN IP. See `documentation.md` §13.
 
 > Never claim a TV-facing change works because it renders in `npm run dev`. The
 > dev server serves native ESM, which Chromium 47 cannot execute at all.
@@ -105,6 +144,22 @@ expected, not a hang.
 - The app must be served over `http(s)`, never `file://`.
 - No runtime CDN, remote font, or analytics dependency.
 
+### Socket.IO / backend
+
+- The wire contract mirrors `pt-player`. **Never rename an event or reshape a
+  payload** — the backend is shared with the Next.js player and there is no
+  version negotiation.
+- One connection for the whole app, created at module scope in
+  `src/infra/websocket/socket.ts`. Do not call `io()` anywhere else.
+- `transports: ['websocket']` only — the backend rejects polling.
+- Endpoints come from `import.meta.env.VITE_WS_URL` (`.env`). Never hardcode a
+  host in a component, and never put a secret in a `VITE_` variable: Vite inlines
+  it into the bundle and the TV downloads it.
+- Wrap every `localStorage` access — TV firmware throws
+  ([rules.md §6.8](./rules.md#6-traps-that-no-tool-catches)).
+- Guard optional APIs (`screen.orientation?.type`) — a throw inside the connect
+  handler silently kills the whole registration flow.
+
 ---
 
 ## 5. Workflow
@@ -115,17 +170,20 @@ expected, not a hang.
    your summary. Do not silently deviate.
 3. **After editing**
    ```sh
-   npm run check:tv && npm run lint && npm run build
+   npm run check:tv && npm run lint && npm run build && npm run check:bundle
    ```
-   All three must pass. `check:tv` exits non-zero on errors.
+   All four must pass. `check:tv` and `check:bundle` exit non-zero on errors.
 4. **Verify the artefact**, not just the source:
    ```sh
-   grep -o 'gap:[^;}]*' dist/assets/*.css          # expect nothing
+   npm run check:bundle                             # parses dist/ legacy bundles
+   grep -o 'gap:[^;}]*' dist/assets/*.css           # expect nothing
    grep -oE '[0-9]+(svh|dvh|lvh)' dist/assets/*.css # expect nothing
    grep -o 'var(--' dist/assets/*.css | wc -l       # expect 0
    ```
 5. **Report honestly.** If you could not test on a real device, say so. Do not
-   describe something as verified when only `npm run dev` was used.
+   describe something as verified when only `npm run dev` was used. Likewise, do
+   not claim the Socket.IO integration works if you only exercised it against a
+   mock — the backend contract in `pt-player` is the source of truth.
 
 ---
 

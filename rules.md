@@ -112,10 +112,13 @@ legacy({
 | `AbortController` | Chromium 66 | Polyfill if used |
 | `queueMicrotask` | Chromium 71 | Usually covered by core-js — verify in `dist/` |
 | `Element.animate()` / `getAnimations()` | Chromium 36 / 84 | Prefer CSS transitions; avoid `getAnimations` |
+| Fullscreen API (unprefixed) | Chromium 71 | Use the `webkit`-prefixed fallback — see [§6.7](#6-traps-that-no-tool-catches) |
+| `screen.orientation` | Chromium 38 | Optional on TV firmware — guard with `?.` |
 
 `fetch`, `Promise`, `Symbol`, `Map`/`Set`, `URL`/`URLSearchParams`, `WebSocket`,
-`localStorage`, `requestAnimationFrame`, `matchMedia`, `classList`, `CustomEvent`
-are all safe on Chromium 47.
+`requestAnimationFrame`, `matchMedia`, `classList`, `CustomEvent` are all safe on
+Chromium 47. `localStorage` exists but **may throw** — always wrap it
+([§6.8](#6-traps-that-no-tool-catches)).
 
 > **MUST NOT** rely on a runtime-loaded `<script>` to bring in a polyfill. The
 > legacy bundle is loaded *as* the app; there is no "later" to patch it.
@@ -227,6 +230,8 @@ debug on a TV where you have no devtools.
 | **SHOULD:** inline critical SVG sprites into the document | External `<use>` is the most common TV rendering failure |
 | **MUST NOT:** depend on remote fonts, CDNs, or analytics at runtime | TV browsers are frequently offline and the UA is spoofed |
 | **MUST NOT:** assume a viewport smaller than 1920×1080 | TV panels are 1080p; test the `> 1024px` branch |
+| **MUST NOT:** commit TLS private keys or certificates (`*.pem`, `*.key`) | `.gitignore` covers them; `npm run cert:generate` recreates the dev pair anywhere |
+| **MUST NOT:** treat `serve:https` as a TV-testable URL | The dev domain resolves only via this machine's hosts file, and the TVs do not trust the mkcert CA |
 
 Absolute asset URLs (`/assets/…`) are the Vite default and work when the app is
 served from a domain root. If the player is packaged under a sub-path, set
@@ -255,16 +260,36 @@ dependency upgrade.
    computed property or a dynamically imported module may not be polyfilled.
 6. **`:focus-visible` silently removes focus styles.** See
    [§4.2](#42-focus-styling-is-a-requirement-not-a-nicety).
+7. **The Fullscreen API needs the `webkit` prefix.** `requestFullscreen`,
+   `document.fullscreenElement`, `exitFullscreen` and the `fullscreenchange`
+   event only exist from Chromium 71. The TVs expose
+   `webkitRequestFullscreen` / `webkitFullscreenElement` / `webkitExitFullscreen`
+   / `webkitfullscreenchange` instead. Calling the unprefixed form throws
+   "not a function" and kills the handler. Always go through a helper — see
+   `src/hooks/useFullscreen.ts`.
+8. **`localStorage` can throw.** Desktop Chrome almost never does, but TV
+   firmware and private-mode engines do, and an uncaught throw during render
+   blanks the screen. Always wrap it — see `src/utils/storage.ts`.
+9. **Third-party libraries pull in older-browser landmines.** `socket.io-client`
+   is safe here, but only because Vite resolves its `browser` field: the
+   Node variant of `globals.node.js` exports `global` and would need the
+   `globalThis` polyfill (Chromium 71+). After adding or upgrading a dependency,
+   re-run the AST check in [§7](#verifying-a-build) — it is the only thing that
+   proves the shipping bundle is clean.
+10. **`screen.orientation` is optional.** The API is Chromium 38+, but some TV
+    engines omit it entirely. Reading `screen.orientation.type` unguarded throws
+    inside the socket connect handler. Use `?.` with a fallback.
 
 ---
 
 ## 7. Enforcement
 
 ```sh
-npm run check:tv     # static guard: banned syntax, APIs, CSS features
-npm run lint         # oxlint
-npm run build        # tsc -b && vite build
-npm run preview      # serve dist/ — the only way to test the TV path
+npm run check:tv      # static guard: banned syntax, APIs, CSS features
+npm run lint          # oxlint
+npm run build         # tsc -b && vite build
+npm run check:bundle  # verifies dist/: parses the shipped legacy bundle
+npm run preview       # serve dist/ — the only way to test the TV path
 ```
 
 `check:tv` reports two severities:
@@ -282,12 +307,16 @@ the same line or the line above it, together with the reason:
 
 ### Verifying a build
 
+`check:tv` reads the source; `check:bundle` reads the artefact. Both are needed:
+a dependency can ship untranspiled syntax that no source rule could ever see.
+
 ```sh
 npm run build
-grep -o 'gap:[^;}]*'   dist/assets/*.css   # expect no output
-grep -oE '[0-9]+(svh|dvh|lvh)' dist/assets/*.css   # expect no output
-grep -o 'var(--' dist/assets/*.css | wc -l # expect 0 unless @supports-gated
-grep -c 'async function' dist/assets/*-legacy-*.js  # expect 0
+npm run check:bundle  # parses dist/*legacy*.js and fails on any post-ES2015 syntax
+grep -o 'gap:[^;}]*'   dist/assets/*.css               # expect no output
+grep -oE '[0-9]+(svh|dvh|lvh)' dist/assets/*.css       # expect no output
+grep -o 'var(--' dist/assets/*.css | wc -l             # expect 0 unless @supports-gated
+grep -c 'globalThis' dist/assets/index-legacy-*.js     # expect 0 (must resolve to the shim)
 ```
 
 ### Definition of done
@@ -297,7 +326,8 @@ A change is only finished when **all** of these hold:
 - [ ] `npm run check:tv` → 0 errors
 - [ ] `npm run lint` → clean
 - [ ] `npm run build` → succeeds
-- [ ] the build-output greps above return the expected results
+- [ ] `npm run check:bundle` → legacy bundles reported safe
+- [ ] the CSS greps above return the expected results
 - [ ] the change was exercised through `npm run preview`, not `npm run dev`
 - [ ] anything user-visible was re-checked for D-pad focus
 

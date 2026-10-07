@@ -24,13 +24,37 @@ targets **Chromium 47** — the single floor that satisfies all three. Building 
 
 ```sh
 npm install
-npm run dev        # modern browsers only — HMR/native ESM, unusable on a TV
-npm run build      # -> dist/ with both a modern and a legacy (TV) bundle
-npm run preview    # serve dist/ — the only local way to exercise the TV path
-npm run serve:tv   # same, bound to 0.0.0.0 so a TV on your LAN can load it
-npm run check:tv   # static smart-TV compatibility guard
+cp .env.example .env.local   # only if you need a different backend
+npm run dev          # modern browsers only — HMR/native ESM, unusable on a TV
+npm run build        # -> dist/ with both a modern and a legacy (TV) bundle
+npm run check:bundle # verify the built legacy bundles are Chromium 47 safe
+npm run preview      # serve dist/ — the only local way to exercise the TV path
+npm run serve:tv     # same, bound to 0.0.0.0 so a TV on your LAN can load it
+npm run cert:generate # once: mkcert leaf for the HTTPS dev domain
+npm run serve:https  # HTTPS :3030 at https://pt-player.mdevoffice.net
+npm run check:tv     # static source guard for TV compatibility
 npm run lint
 ```
+
+Three ways to run it, for three different purposes:
+
+| | URL | Who can open it |
+| --- | --- | --- |
+| `serve:tv` | `http://<lan-ip>:4173` | **the TVs** on your network |
+| `serve:https` | `https://pt-player.mdevoffice.net:3030` | this machine only (hosts entry + mkcert CA); see [documentation.md §13](./documentation.md#13-https-mode) |
+| `preview` | `http://localhost:4173` | this machine only |
+
+The HTTPS mode mirrors `player-pt` — same domain, same port — but it cannot be
+used from a TV: the domain has no public DNS record and TV browsers do not trust
+the mkcert CA. Use `serve:tv` for the TVs.
+
+Configuration lives in `.env` (committed, shared defaults) with per-machine
+overrides in `.env.local` (git-ignored). Only `VITE_`-prefixed keys reach the
+browser, and they are **inlined into the bundle** — never put a secret there.
+
+| Variable | Meaning |
+| --- | --- |
+| `VITE_WS_URL` | Socket.IO origin of the player backend, e.g. `https://pricetag-stag2.mdevoffice.net` |
 
 > `npm run dev` serves native ES modules with HMR, so **Chromium 47/53/56 cannot
 > load it**. Develop in a modern browser, then verify real TV behaviour against
@@ -42,9 +66,9 @@ npm run lint
 > reach — use the LAN address instead. Details in
 > [documentation.md §9](./documentation.md#9-deployment-notes).
 
-`npm run build` is dominated by the legacy Babel pass — roughly 10 s with a warm
-cache, up to about a minute on the first run after a clean install. That is
-expected, not a hang.
+`npm run build` is dominated by the legacy Babel pass — roughly 10–20 s with a
+warm cache, several minutes on the first run after a clean install now that
+`socket.io-client` is in the graph. That is expected, not a hang.
 
 ## How the TV path works
 
