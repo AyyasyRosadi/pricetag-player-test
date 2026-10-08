@@ -212,43 +212,57 @@
   outline-offset: 2px;
 }
 
+/* Submit is disabled while the save is in flight, and both Submit and Cancel
+   are disabled with it so a double-press cannot fire two saves. */
+.registration__button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /*
- * Bottom-of-screen status line. Not part of the pt-player design: it is pinned
- * to the viewport rather than placed inside the card, so it can never shift the
- * card's geometry, which is the whole point of matching the target pixel for
- * pixel.
+ * Submit / Cancel — as wide as the code field above.
  *
- * Two users share it, which is why the geometry is on a shared selector:
- *   .registration__offline  the socket-down notice (currently not rendered —
- *                           socket wiring in index.tsx is commented out)
- *   .registration__probe    the temporary API reachability probe
- *                           (see hooks/useApiProbe.ts)
+ * The field is `w-[90%]` of the CARD, but these live inside
+ * `.registration__actions`, which is only 80% of the card. 90% of the card is
+ * therefore 112.5% of this container. `align-self` is not optional: a column
+ * flex container stretches its children, which would otherwise pin the overflow
+ * to the left edge and break the alignment the whole point of this rule.
  */
-.registration__offline,
-.registration__probe {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 8px;
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  text-align: center;
-  word-break: break-all;
+.registration__button--wide {
+  width: 112.5%;
+  align-self: center;
 }
 
-.registration__offline {
-  color: #b91c1c;
+/*
+ * "Loading content…" — shown inside the card while the player is fetching.
+ *
+ * NOTE the missing `margin: 0`. A shorthand here would tie on specificity with
+ * `.registration__card > * + *` above and win by source order, silently removing
+ * the 8px gap — this is exactly the bug documented in rules.md §6.13. Only the
+ * <p>'s UA bottom margin is cleared; `margin-top` still comes from the gap rule.
+ */
+.registration__hint {
+  margin-bottom: 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: #4681f4;
 }
 
-/* Success uses the same slot as the failure text, but green — a green tick in
-   red is worse than no colour at all. */
-.registration__probe {
-  color: #15803d;
+/*
+ * Cross-fade between the registration card and the content view.
+ *
+ * Only `opacity` is transitioned. `opacity < 1` creates a stacking context but
+ * NOT a containing block, so the frame canvas inside keeps its viewport-relative
+ * `position: fixed` and still fills the screen.
+ */
+.screen-fade {
+  transition: opacity 420ms ease-out;
 }
 
-.registration__probe--error {
-  color: #b91c1c;
+.screen-fade--out {
+  opacity: 0;
+  /* A transparent layer must not keep swallowing clicks on the way out. */
+  pointer-events: none;
 }
 
 @media (max-width: 1024px) {

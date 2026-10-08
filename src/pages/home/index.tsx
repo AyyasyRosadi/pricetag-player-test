@@ -1,26 +1,41 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import ToastHost from '@/components/molecules/toast-host'
 import {
   REGISTRATION_CODE_KEY,
   WAITING_REGISTRATION_CODE,
 } from '@/constants/registration'
-import { dummyData } from '@/constants/dummy'
-import { useApiProbe } from '@/hooks/useApiProbe'
+import { describeApiError } from '@/infra/api/error'
+import { saveCode } from '@/infra/api/priceTag'
+import { pushToast } from '@/infra/toast/store'
 import { useFullscreen } from '@/hooks/useFullscreen'
+import { usePlayerContent } from '@/hooks/usePlayerContent'
 import Content from '@/pages/content'
 import { getLocalStorageItem, setLocalStorageItem } from '@/utils/storage'
 import './index.css'
 
 /**
- * Registration screen — a 1:1 port of `pt-player`'s `src/page/home` default
- * variant, so the two players are visually identical. The card geometry in
- * `index.css` is the Tailwind class list from that file resolved to pixels and
- * verified against a screenshot of the running Next.js player.
+ * Delay before the cross-fade starts, so the browser has painted the card
+ * before the opacity transition begins. Without it the transition can be
+ * collapsed into the first paint and appear as an instant switch.
+ */
+const TRANSITION_DELAY_MS = 40
+
+/**
+ * Registration screen and content entry point.
  *
- * The Socket.IO wiring that used to live here is gone; `registrationCode` now
- * comes from `localStorage` alone (see the Insert Code / Submit buttons).
+ * Card geometry is a 1:1 port of `pt-player`'s `src/page/home` default variant —
+ * the numbers in `index.css` are the Tailwind classes from that file resolved to
+ * pixels and verified against a screenshot of the running Next.js player.
  *
- * "Show Content" renders `constants/dummy.ts` through the ported frame renderer
- * (`pages/content`), which is the same path a real payload will take.
+ * Flow:
+ *   - No saved code       -> [Fullscreen] [Insert Code]
+ *   - Editing             -> [Fullscreen] [Submit] [Cancel]  (Submit/Cancel are
+ *                            as wide as the code field above)
+ *   - Code saved          -> [Fullscreen] only; the code is hidden behind a
+ *                            fade once content arrives
+ *
+ * The API pair is `/price-tag/*` — see `infra/api/priceTag.ts`, which documents
+ * that those routes are not deployed yet.
  */
 function Home() {
   const { ref: screenRef, isFullscreen, toggle } = useFullscreen<HTMLDivElement>()
@@ -30,143 +45,195 @@ function Home() {
   )
   const [isEditing, setIsEditing] = useState(false)
   const [draftCode, setDraftCode] = useState('')
-  const [showContent, setShowContent] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  /** Set by "Close content"; the player keeps polling, it just stops showing. */
+  const [isContentHidden, setIsContentHidden] = useState(false)
 
-  // TEMPORARY: see hooks/useApiProbe.ts.
-  const probe = useApiProbe()
+  const { content, isLoading } = usePlayerContent(savedCode)
+
+  const isSaved = Boolean(savedCode)
+  const wantsContent = content !== null && !isContentHidden
+
+  /*
+   * Cross-fade. Both directions go through the timer rather than setting state
+   * synchronously in the effect — that is what the `set-state-in-effect` lint
+   * rule rejects, and the delay is what makes the transition visible at all.
+   */
+  const [showContent, setShowContent] = useState(false)
+  useEffect(() => {
+    const id = window.setTimeout(
+      () => setShowContent(wantsContent),
+      wantsContent ? TRANSITION_DELAY_MS : 0,
+    )
+    return () => window.clearTimeout(id)
+  }, [wantsContent])
 
   const code = savedCode ?? WAITING_REGISTRATION_CODE
 
-  const handleSubmitCode = () => {
-    const trimmed = draftCode.trim()
-    if (!trimmed) return
-
-    setLocalStorageItem(REGISTRATION_CODE_KEY, trimmed)
-    setSavedCode(trimmed)
-    setDraftCode('')
+  const handleCancel = () => {
     setIsEditing(false)
+    setDraftCode('')
   }
 
-  /*
-   * The frame canvas is `position: fixed` and covers the viewport, so the card
-   * cannot be clicked through while it is up. That is why there is a close
-   * affordance here — a TV has no reload button, and without it the only way
-   * back to the registration screen would be power-cycling the device.
-   */
-  if (showContent) {
-    return (
-      <>
-        <Content {...dummyData} />
-        <button
-          type="button"
-          className="content-close"
-          onClick={() => setShowContent(false)}
-        >
-          Close content
-        </button>
-      </>
-    )
+  const handleSubmit = async () => {
+    const trimmed = draftCode.trim()
+    if (!trimmed || isSaving) return
+
+    setIsSaving(true)
+    try {
+      const result = await saveCode(trimmed)
+
+      // A backend that answers 200 with `{ ok: false }` must not be treated as a
+      // success — otherwise a rejected code gets persisted and the screen locks
+      // itself into a code the server never accepted.
+      if (result?.ok === false) {
+        pushToast('The server rejected that code', 'error')
+        return
+      }
+
+      setLocalStorageItem(REGISTRATION_CODE_KEY, trimmed)
+      setSavedCode(trimmed)
+      setDraftCode('')
+      setIsEditing(false)
+      pushToast('Code saved successfully', 'success')
+
+      // No explicit fetch here: changing `savedCode` re-runs the `initial` fetch
+      // inside `usePlayerContent`, which is also what happens on a cold start.
+      // Calling it here as well would double-fetch.
+    } catch (error) {
+      pushToast(describeApiError(error), 'error')
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (
-    <div className="registration" ref={screenRef}>
-      <div className="registration__card">
-        <div className="registration__brand">
-          <img className="registration__icon" src="/images/icon.png" alt="" />
-          <img
-            className="registration__logo"
-            src="/images/title.svg"
-            alt="SmartPriceTag"
-          />
-        </div>
-
-        <div className="registration__title-wrap">
-          <h1 className="registration__title">Welcome to screen</h1>
-        </div>
-
-        <div className="registration__lead">
-          <p className="registration__lead-line">This is your</p>
-          <p className="registration__lead-accent">Screen Registration Code</p>
-        </div>
-
-        {isEditing ? (
-          <input
-            className="registration__code registration__code--input"
-            value={draftCode}
-            onChange={(event) => setDraftCode(event.target.value)}
-          />
-        ) : (
-          <div
-            className={
-              savedCode
-                ? 'registration__code'
-                : 'registration__code registration__code--waiting'
-            }
-          >
-            {code}
+    <>
+      <div
+        className={
+          showContent ? 'registration screen-fade screen-fade--out' : 'registration screen-fade'
+        }
+        ref={screenRef}
+      >
+        <div className="registration__card">
+          <div className="registration__brand">
+            <img className="registration__icon" src="/images/icon.png" alt="" />
+            <img
+              className="registration__logo"
+              src="/images/title.svg"
+              alt="SmartPriceTag"
+            />
           </div>
-        )}
 
-        <div className="registration__actions">
-          <button type="button" className="registration__button" onClick={toggle}>
-            {isFullscreen ? 'Exit' : 'Fullscreen'}
-          </button>
+          <div className="registration__title-wrap">
+            <h1 className="registration__title">Welcome to screen</h1>
+          </div>
 
-          <button
-            type="button"
-            className="registration__button registration__button--bordered"
-            onClick={() => setIsEditing((editing) => !editing)}
-          >
-            Insert Code
-          </button>
+          <div className="registration__lead">
+            <p className="registration__lead-line">This is your</p>
+            <p className="registration__lead-accent">Screen Registration Code</p>
+          </div>
 
-          {/* Only meaningful while the field is open; it commits the draft. */}
-          {isEditing && (
+          {isEditing ? (
+            <input
+              className="registration__code registration__code--input"
+              value={draftCode}
+              disabled={isSaving}
+              onChange={(event) => setDraftCode(event.target.value)}
+            />
+          ) : (
+            <div
+              className={
+                isSaved
+                  ? 'registration__code'
+                  : 'registration__code registration__code--waiting'
+              }
+            >
+              {code}
+            </div>
+          )}
+
+          <div className="registration__actions">
             <button
               type="button"
               className="registration__button"
-              onClick={handleSubmitCode}
+              onClick={toggle}
             >
-              Submit
+              {isFullscreen ? 'Exit' : 'Fullscreen'}
             </button>
-          )}
 
-          <button
-            type="button"
-            className="registration__button registration__button--bordered"
-            onClick={() => setShowContent(true)}
-          >
-            Show Content
-          </button>
+            {/*
+             * Insert Code is hidden for good once a code is saved — the screen is
+             * provisioned at that point, and re-registering is an operator task
+             * (clear the code, or use the CMS), not something to expose on a TV.
+             */}
+            {!isEditing && !isSaved && (
+              <button
+                type="button"
+                className="registration__button registration__button--bordered"
+                onClick={() => setIsEditing(true)}
+              >
+                Insert Code
+              </button>
+            )}
+
+            {/* Submit and Cancel replace Insert Code, and are as wide as the
+                field above so all three edges line up. */}
+            {isEditing && (
+              <>
+                <button
+                  type="button"
+                  className="registration__button registration__button--wide"
+                  disabled={isSaving}
+                  onClick={handleSubmit}
+                >
+                  {isSaving ? 'Saving…' : 'Submit'}
+                </button>
+
+                <button
+                  type="button"
+                  className="registration__button registration__button--bordered registration__button--wide"
+                  disabled={isSaving}
+                  onClick={handleCancel}
+                >
+                  Cancel
+                </button>
+              </>
+            )}
+          </div>
+
+          {isLoading && (
+            <p className="registration__hint">Loading content…</p>
+          )}
         </div>
       </div>
 
+      {content && (
+        <div className={showContent ? 'screen-fade' : 'screen-fade screen-fade--out'}>
+          <Content {...content} />
+        </div>
+      )}
+
       {/*
-       * TEMPORARY diagnostic, occupying the slot the offline notice used to
-       * (pinned to the viewport, outside the card, so the card geometry is
-       * untouched). See hooks/useApiProbe.ts.
+       * DEV AFFORDANCE — delete before shipping to screens.
+       *
+       * The frame canvas is `position: fixed` and fills the viewport, and a TV
+       * has no reload button, so without this there is no way back to the
+       * registration card once content is showing. Closing only hides the frame;
+       * polling continues, so the next changed payload brings it back.
        */}
-      {probe.status === 200 && (
-        <p className="registration__probe">
-          call api success with status {probe.status}
-          {probe.firstUser
-            ? ` · #${probe.firstUser.id} ${probe.firstUser.first_name} ${probe.firstUser.last_name} (${probe.firstUser.email})`
-            : ''}
-        </p>
+      {showContent && (
+        <button
+          type="button"
+          className="content-close"
+          onClick={() => setIsContentHidden(true)}
+        >
+          Close content
+        </button>
       )}
 
-      {probe.status !== null && probe.status !== 200 && (
-        <p className="registration__probe registration__probe--error">
-          call api failed with status {probe.status}
-        </p>
-      )}
-
-      {probe.error && (
-        <p className="registration__probe registration__probe--error">
-          call api failed · {probe.error}
-        </p>
-      )}
-    </div>
+      <ToastHost />
+    </>
   )
 }
 

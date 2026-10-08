@@ -324,6 +324,19 @@ dependency upgrade.
     **two** modules here — the frame canvas and `react-fast-marquee` — so the
     `.flat()`/`.at()`-style source scans will never flag an unguarded
     `new ResizeObserver(...)` inside a dependency.
+16. **`JSON.stringify` is not a payload comparison.** It is key-order sensitive,
+    so a backend that serialises the same object with a different key order looks
+    like a change. Here that means the 30s poll re-mounts the frame and restarts
+    video playback even though nothing moved. **MUST** compare with
+    `utils/deepEqual.ts`.
+    Related: presigned media URLs (`X-Amz-Date`, `X-Amz-Signature`) change on
+    every fetch. If the backend re-mints them, even a correct deep comparison
+    reports "changed" on every poll. Normalise those fields before comparing —
+    do **not** loosen `deepEqual`.
+17. **Never raise a toast from a timer without throttling.** The content poll
+    runs every 30s; an unreachable backend would otherwise stack a new error
+    toast every 30 seconds for as long as the screen is on. Report the first
+    failure of a streak only, and reset on success.
 
 ---
 

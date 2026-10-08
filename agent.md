@@ -45,11 +45,15 @@ src/
   vite-env.d.ts         ← types for ImportMetaEnv
   hooks/
     useFullscreen.ts       ← Fullscreen API with the webkit fallback
-    useApiProbe.ts         ← TEMPORARY reqres.in reachability probe
+    usePlayerContent.ts    ← startup fetch + 30s poll, replaces content only on change
+    useToasts.ts           ← binds the toast store to React
   infra/api/
     client.ts              ← axios instance (withCredentials; NEVER add a timeout)
     player.ts              ← requestPlayerToken / getPlayerContent / getPlayerPresignUrl
+    priceTag.ts            ← saveCode + getContent  (NOT DEPLOYED YET — see §18)
     error.ts               ← describeApiError, incl. the CORS case
+  infra/toast/store.ts     ← module-level toast queue (pushToast)
+  utils/deepEqual.ts       ← poll comparison; JSON.stringify is key-order sensitive
   constants/
     registration.ts        ← registration key + placeholder constant
     object.ts              ← LayoutFrameConstants (frame content types)
@@ -83,16 +87,23 @@ Deliverable: `dist/` (git-ignored). The only server-side code is the local
 
 ### Data flow
 
-> ⚠️ **NO SOCKET.** Socket.IO was removed at the project's request, so nothing
-> pushes a payload any more. `pages/home` reads the registration code from
-> `localStorage`, and **Show Content** renders `constants/dummy.ts` through the
-> real renderer. The diagram below is the *intended* flow for when a transport is
-> reintroduced.
+> ⚠️ **NO SOCKET.** Socket.IO was removed at the project's request. Content now
+> arrives over REST: `POST /price-tag/save-code` binds the typed code, then
+> `GET /price-tag/getContent/:code` supplies the payload, re-fetched every 30s.
+> Those routes are not deployed yet — see documentation.md §18.
 
 ```
-constants/dummy.ts  ──▶  pages/home  ──[Show Content]──▶  pages/content
-                                                            │
-                                                  components/molecules/my-frame
+pages/home  ──[Submit]──▶ POST /price-tag/save-code   (binds the code)
+     │                            │
+     │                            ▼
+     │                     localStorage['registrationCode']
+     │                            │
+     ▼                            ▼
+usePlayerContent ──30s poll──▶ GET /price-tag/getContent/:code
+     │
+     │  deepEqual(new, rendered) -> skip if identical
+     ▼
+pages/content  ──▶  components/molecules/my-frame  (scales the layout)
                                                             │  scales 1920x1080
                                                             ▼
                                                   pages/content/components/wrapper

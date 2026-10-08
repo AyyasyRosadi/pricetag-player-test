@@ -780,35 +780,27 @@ Uncommenting those lines restores phases 1 and 2 exactly as they were.
 | `index.js` | 223.3 kB | **144.5 kB** |
 | build time | 13.6 s | **4.2 s** |
 
-### The probe
+### The probe — REMOVED
 
-`src/hooks/useApiProbe.ts` — clearly marked temporary — fetches
-`https://reqres.in/api/users?page=1` and reports into the slot the offline notice
-used (viewport-pinned, outside the card, so the card geometry is untouched):
+`hooks/useApiProbe.ts` existed to answer one question: can this app make an API
+call from the TV's environment at all? It fetched
+`https://reqres.in/api/users?page=1` and reported into the slot the offline notice
+used, outside the card so the card geometry was untouched:
 
 ```
 call api success with status 200 · #1 George Bluth (george.bluth@reqres.in)
 ```
 
-Green on `200`, red on any other status or on a failed request. Only
-`status === 200` produces the "call api success" wording; anything else is
-reported as a failure so it is obvious which happened.
+It has now been deleted, for three reasons:
 
-Two things about it are deliberate:
+1. The question is answered, and the real `/price-tag/*` calls report their own
+   failures through the toast.
+2. It was a **remote runtime dependency**, which rules.md §5 forbids for shipped
+   code.
+3. The failure shape it used — a viewport-pinned line across the bottom — is
+   where the toast stack now lives.
 
-1. **`fetch`, not the shared `apiClient`.** reqres answers with
-   `Access-Control-Allow-Origin: *`, and a wildcard forbids credentialed
-   requests. `apiClient` sets `withCredentials: true`, so the browser would
-   reject the response before the app saw a status code — a false negative. It
-   also must not inherit `baseURL`, which points at the player API.
-2. **It is a remote runtime dependency**, which rules.md §5 forbids for shipped
-   code. That is why it lives in a file named after the probe rather than in
-   `infra/api`, and why removing it is a three-step job: delete the file, delete
-   the probe block in `pages/home/index.tsx`, delete the `.registration__probe`
-   rules in `pages/home/index.css`.
-
-Ratelimit on the public endpoint is 20 requests / 60 s; the probe fires once per
-page load.
+The `.registration__probe` / `.registration__offline` CSS went with it.
 
 ### Insert Code / Submit
 
@@ -860,15 +852,10 @@ src/pages/content/components/wrapper.tsx     widget dispatcher  [ported]
 src/pages/content/frame-context.ts           FrameContext       [split out]
 ```
 
-### "Show Content"
+### Rendering the frame
 
-`pages/home` gains a **Show Content** button below Insert Code. It renders
-`constants/dummy.ts` through `pages/content`, which is the same path a real
-payload takes. Because the canvas is `position: fixed` and swallows the viewport,
-a small **Close content** button is pinned to the top-left — a TV has no reload
-button, so without it the only way back would be power-cycling.
-
-Verified rendered text from the dummy payload:
+The frame is driven by the API now — see §18. Verified rendered text from a
+mocked payload:
 
 ```
 Loading video…  ~  Matoa KG  ~  225.000  ~  / Kg  ~  10 October 2026
@@ -960,8 +947,9 @@ not ported: the scheduler, screen rotation, and the content-diff/watchdog logic.
 
 ## 17. The blank-screen bug: `additionalLegacyPolyfills` does not work
 
-**Symptom.** After clicking **Show Content**, the LG TV showed a blank white
-screen. The laptop was fine.
+**Symptom.** After entering a code and submitting it, the LG TV showed a blank
+white screen. The laptop was fine. (At the time, the frame was reached through a
+**Show Content** button, since removed — see §18.)
 
 **Cause.** `ResizeObserver is not defined`, thrown during the first effect of
 `MyFrame`. React unmounted the tree, so nothing rendered. `ResizeObserver` is
@@ -1013,14 +1001,20 @@ are invisible to them.
 2. loads the **legacy** polyfill chunk and entry (with `nomodule` stripped, so a
    modern Chrome will run them — this is the only way to exercise the legacy path
    without a TV);
-3. clicks **Show Content**, then reports uncaught errors and rendered text.
+3. **seeds a `registrationCode` in `localStorage`**, so the app takes the
+   provisioned path (startup fetch -> content -> frame), then reports uncaught
+   errors and rendered text.
 
 The deletion happens *before* the polyfill chunk, exactly as on a real TV, so
 whatever core-js restores is what the TV would have had.
 
+The frame only renders if the API answers, so pair the probe with the mock from
+§18 when the real routes are missing:
+
 ```
-npm run build
-npm run serve:tv          # in another shell
+npm run mock:api                                    # terminal 1
+printf 'VITE_API_URL=http://127.0.0.1:4180/api\n' > .env.local
+npm run build && npm run serve:tv                   # terminal 2
 npm run probe:legacy
 chrome --headless=new --dump-dom http://172.16.30.107:4173/_legacy-probe.html
 ```
@@ -1033,8 +1027,14 @@ after app entry      : {"ResizeObserver":"function"}
 
 ERRORS (0):
 
-RENDERED TEXT: Loading video…  ~  Matoa KG  ~  225.000  ~  / Kg
+RENDERED TEXT: Welcome to screen ... Screen Registration Code PROBE1 Fullscreen
+             ~  Loading video…  ~  Matoa KG  ~  225.000  ~  / Kg
              ~  10 October 2026  ~  Special Price Until:  ~  Close content
+```
+
+> `console.error: Video error` is expected and harmless: the media URLs in
+> `constants/dummy.ts` are presigned with a 1-hour expiry, so an old copy of the
+> payload has a dead video URL. The widget logs it and keeps rendering.
 ```
 
 > The early snapshot being `undefined` is expected and is *not* a failure: the
@@ -1043,3 +1043,148 @@ RENDERED TEXT: Loading video…  ~  Matoa KG  ~  225.000  ~  / Kg
 
 **Rule of thumb:** when something works on the laptop and fails on a TV, do not
 reason about it from the source — run `probe:legacy` and look at the error.
+
+---
+
+## 18. Provisioning and the content lifecycle
+
+The registration screen now provisions the screen itself and pulls content,
+replacing the old **Show Content** button (which only ever rendered the bundled
+`constants/dummy.ts`).
+
+### Button flow
+
+| State | Buttons |
+| --- | --- |
+| No saved code | `Fullscreen` · `Insert Code` |
+| Editing | `Fullscreen` · `Submit` · `Cancel` |
+| Code saved | `Fullscreen` |
+
+`Submit` and `Cancel` **replace** `Insert Code` rather than joining it, and are
+as wide as the code field above (all three edges line up — measured at 432.0 px
+across all three). `Insert Code` is then hidden permanently once a code is in
+`localStorage`: the screen is provisioned at that point, so re-registering is an
+operator task, not something to expose on a TV.
+
+### The API
+
+`infra/api/priceTag.ts`:
+
+```
+POST /price-tag/save-code          body { code }        -> { ok: true }
+GET  /price-tag/getContent/:code   (code as a path param) -> PlayerContentData
+```
+
+A `200 { ok: false }` is treated as a rejection, so a backend that reports
+failure in the body cannot get a bad code persisted.
+
+> ⚠️ **These routes are not deployed.** Probed 2026-10-07 against
+> `https://pricetag-stag2.mdevoffice.net/api`: `/player-render/...` answers
+> `401 application/json` (a real route), while `/price-tag/...` answers
+> `404 text/html` with `Vary: rsc` — the Next front-end, not an API. Every call
+> therefore fails today, and that failure is shown as an error toast.
+
+### The lifecycle
+
+```
+savedCode (localStorage)
+      │
+      ├─ on mount, if present ──▶ GET /getContent/:code      ('initial')
+      │
+      └─ every 30s ─────────────▶ GET /getContent/:code      ('poll')
+                                        │
+                            deepEqual(new, rendered)?
+                                        │ yes -> do nothing
+                                        └ no  -> replace
+```
+
+Implemented in `hooks/usePlayerContent.ts`:
+
+- **Startup**: a code in `localStorage` fetches immediately — no operator action.
+- **Poll**: `setInterval` at `CONTENT_POLL_INTERVAL_MS` (30 s).
+- **Comparison**: `utils/deepEqual.ts`, not `JSON.stringify` — the latter is
+  key-order sensitive, so a backend that reorders its serialisation would look
+  like a change and re-mount the frame every 30 s. Verified with 18 cases,
+  including key-order permutations.
+- **Superseded requests**: a request id guards against a slow earlier response
+  overwriting a newer one.
+- **Error throttling**: `poll` failures raise a toast only on the *first* failure
+  of a streak; otherwise an unreachable backend would stack a new error every 30
+  seconds forever. A success resets the streak. `initial` and `explicit` always
+  report.
+
+⚠️ **Watch the presigned URLs.** `item_image` and `videoDetails[].VideoUrl` carry
+`X-Amz-Date` / `X-Amz-Signature` query strings. If the backend mints new ones on
+every call, `deepEqual` will report "changed" on every poll and the frame will
+re-mount (restarting video) every 30 s even though nothing moved. The fix belongs
+in a normaliser, not in `deepEqual` — see the caveat in that file.
+
+### Toast
+
+`infra/toast/store.ts` is a framework-free queue; `hooks/useToasts.ts` binds it
+with `useSyncExternalStore` (a React 18 API, not a browser one — no Chromium 47
+concern). `components/molecules/toast-host` renders it bottom right (measured at
+`right: 24, bottom: 24`), `pointer-events: none` so a toast can never swallow a
+click or take D-pad focus, auto-dismissing after 4 s.
+
+"Code saved successfully" is a success toast; failures use
+`describeApiError` and a red tone.
+
+### The transition
+
+Moving from the card to the frame cross-fades over 420 ms. Only `opacity` is
+transitioned: `opacity < 1` creates a stacking context but **not** a containing
+block, so the frame canvas inside keeps its viewport-relative
+`position: fixed`. The 40 ms delay before the fade starts guarantees the browser
+has painted the card first, otherwise the transition collapses into the initial
+paint and reads as an instant switch.
+
+### Testing it before the backend exists
+
+`scripts/mock-api.mjs` (`npm run mock:api`) is a **dev tool**, not a fallback —
+nothing in `src/` knows it exists:
+
+```
+npm run mock:api                                    # terminal 1
+printf 'VITE_API_URL=http://127.0.0.1:4180/api\n' > .env.local
+npm run build && npm run serve:tv                   # terminal 2
+# on the TV: Insert Code -> Submit -> frame appears
+curl 'http://127.0.0.1:4180/__variant?v=2'          # next poll swaps the content
+```
+
+**Delete `.env.local` and rebuild afterwards**, or the build will keep pointing
+at the mock.
+
+Verified end to end against this mock:
+
+```
+1. initial buttons      : ["Fullscreen","Insert Code"]      Show Content: false
+2. after Insert Code    : ["Fullscreen","Submit","Cancel"]
+   widths input/submit/cancel: 432.0 / 432.0 / 432.0  -> match: true
+4. toast                : "Code saved successfully"   right:24 bottom:24
+   localStorage         : "ABC123"
+   buttons after save   : ["Fullscreen"]              Insert Code gone: true
+5. frame rendered       : true   card faded out: true
+   frame text           : ... Matoa KG 225.000 / Kg 10 October 2026 ...
+
+poll  t= 2s / 20s / 40s -> "Matoa KG"        (identical payloads: no change)
+      mock switched to variant 2
+poll  t=80s             -> "VARIANT TWO ITEM"  (changed payload: replaced)
+```
+
+The mock logged exactly the contract specified:
+
+```
+OPTIONS /api/price-tag/save-code
+POST    /api/price-tag/save-code          -> body {"code":"ABC123"}
+GET     /api/price-tag/getContent/ABC123
+```
+
+### Removed
+
+- `hooks/useApiProbe.ts` and its `.registration__probe` / `.registration__offline`
+  CSS — the temporary reqres.in reachability probe. Its bottom-of-screen slot is
+  where the toast stack lives now, and it was a remote runtime dependency that
+  rules.md §5 forbids.
+- The **Show Content** button and its `constants/dummy.ts` import. `dummy.ts`
+  itself is still used, by the mock server and `probe:legacy`.

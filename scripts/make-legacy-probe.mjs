@@ -51,6 +51,11 @@ try { delete Array.prototype.at; } catch (e) {}
 try {
   Object.defineProperty(window, 'visualViewport', { configurable: true, get: function () { return undefined; } });
 } catch (e) {}
+
+// Seed a registration code so the app takes its "already provisioned" path:
+// startup fetch -> content -> frame. This page runs during parsing, before the
+// deferred app module, so the seed is in place when the app reads it.
+try { window.localStorage.setItem('registrationCode', 'PROBE1'); } catch (e) {}
 </script>
 </head>
 <body>
@@ -70,14 +75,11 @@ try {
   System.import('${entry}');
 </script>
 <script>
-  setTimeout(function () {
-    var btn = Array.prototype.find.call(document.querySelectorAll('button'), function (b) {
-      return b.textContent.trim() === 'Show Content';
-    });
-    if (!btn) { window.__errors.push('Show Content button NOT FOUND'); return finish(); }
-    btn.click();
-    setTimeout(finish, 2500);
-  }, 2500);
+  // Give the app time to boot, fetch /price-tag/getContent/PROBE1 and render the
+  // frame. Nothing is clicked: with a seeded code the player provisions itself,
+  // which is exactly the path a TV takes.
+  // NOTE: no backticks in this block — the whole page is a JS template literal.
+  setTimeout(finish, 5000);
 
   function finish() {
     // Sample ResizeObserver AGAIN here: the polyfill is installed by the app

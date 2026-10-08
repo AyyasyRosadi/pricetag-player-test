@@ -16,7 +16,8 @@
     "lint": "oxlint",
     "check:tv": "node scripts/check-tv-compat.mjs",
     "check:bundle": "node scripts/check-legacy-bundle.mjs",
-    "probe:legacy": "node scripts/make-legacy-probe.mjs"
+    "probe:legacy": "node scripts/make-legacy-probe.mjs",
+    "mock:api": "node scripts/mock-api.mjs"
   },
   "dependencies": {
     "axios": "^1.13.2",
