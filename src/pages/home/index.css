@@ -163,17 +163,24 @@
 }
 
 /*
- * flex flex-col gap-3 w-[80%] mt-12
+ * flex flex-col gap-3 mt-12, at 90% width.
  *
  * `mt-12` is 48px, but in the original it stacks ON TOP of the parent's 8px
  * `gap-2` — flexbox adds gap and margin, it does not choose between them. Since
  * the gap is emulated with `margin-top` here, the single declaration has to be
  * the sum: 48 + 8 = 56px.
+ *
+ * DEVIATION FROM pt-player: upstream is `w-[80%]`, which makes the buttons
+ * narrower than the code field above them. The design here is that every button
+ * lines up with the field's edges, so the container is the field's own `w-[90%]`
+ * and every button simply fills it. That is also why there is no per-button
+ * width class: `align-items` defaults to `stretch`, so each button is exactly
+ * as wide as the container.
  */
 .registration__actions {
   display: flex;
   flex-direction: column;
-  width: 80%;
+  width: 90%;
   margin-top: 56px;
 }
 
@@ -217,20 +224,6 @@
 .registration__button:disabled {
   opacity: 0.6;
   cursor: default;
-}
-
-/*
- * Submit / Cancel — as wide as the code field above.
- *
- * The field is `w-[90%]` of the CARD, but these live inside
- * `.registration__actions`, which is only 80% of the card. 90% of the card is
- * therefore 112.5% of this container. `align-self` is not optional: a column
- * flex container stretches its children, which would otherwise pin the overflow
- * to the left edge and break the alignment the whole point of this rule.
- */
-.registration__button--wide {
-  width: 112.5%;
-  align-self: center;
 }
 
 /*

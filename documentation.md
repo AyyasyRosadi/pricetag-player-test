@@ -1060,11 +1060,20 @@ replacing the old **Show Content** button (which only ever rendered the bundled
 | Editing | `Fullscreen` · `Submit` · `Cancel` |
 | Code saved | `Fullscreen` |
 
-`Submit` and `Cancel` **replace** `Insert Code` rather than joining it, and are
-as wide as the code field above (all three edges line up — measured at 432.0 px
-across all three). `Insert Code` is then hidden permanently once a code is in
-`localStorage`: the screen is provisioned at that point, so re-registering is an
-operator task, not something to expose on a TV.
+`Submit` and `Cancel` **replace** `Insert Code` rather than joining it.
+
+**Every button is exactly as wide as the code field**, and their left edges
+align — measured at 432.0 px / left 542.8 for the field, `Fullscreen`,
+`Insert Code`, `Submit` and `Cancel` alike, in both states. This is a deliberate
+deviation from `pt-player`, which uses `w-[80%]` for the button column against
+`w-[90%]` for the field, leaving the buttons narrower and misaligned. The
+implementation is a single number: `.registration__actions` is `width: 90%` (the
+field's own width) and every button fills it, since a column flex container
+stretches its children by default.
+
+`Insert Code` is hidden permanently once a code is in `localStorage`: the screen
+is provisioned at that point, so re-registering is an operator task, not
+something to expose on a TV.
 
 ### The API
 

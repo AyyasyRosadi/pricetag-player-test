@@ -27,10 +27,14 @@ const TRANSITION_DELAY_MS = 40
  * the numbers in `index.css` are the Tailwind classes from that file resolved to
  * pixels and verified against a screenshot of the running Next.js player.
  *
+ * One deliberate deviation: every button is as wide as the code field above it.
+ * Upstream uses `w-[80%]` for the button column against `w-[90%]` for the field,
+ * so the buttons are narrower and their edges do not line up. See the note on
+ * `.registration__actions` in `index.css`.
+ *
  * Flow:
  *   - No saved code       -> [Fullscreen] [Insert Code]
- *   - Editing             -> [Fullscreen] [Submit] [Cancel]  (Submit/Cancel are
- *                            as wide as the code field above)
+ *   - Editing             -> [Fullscreen] [Submit] [Cancel]
  *   - Code saved          -> [Fullscreen] only; the code is hidden behind a
  *                            fade once content arrives
  *
@@ -177,13 +181,14 @@ function Home() {
               </button>
             )}
 
-            {/* Submit and Cancel replace Insert Code, and are as wide as the
-                field above so all three edges line up. */}
+            {/* Submit and Cancel replace Insert Code. Width comes from
+                `.registration__actions`, which every button fills — see the
+                note on that rule. */}
             {isEditing && (
               <>
                 <button
                   type="button"
-                  className="registration__button registration__button--wide"
+                  className="registration__button"
                   disabled={isSaving}
                   onClick={handleSubmit}
                 >
@@ -192,7 +197,7 @@ function Home() {
 
                 <button
                   type="button"
-                  className="registration__button registration__button--bordered registration__button--wide"
+                  className="registration__button registration__button--bordered"
                   disabled={isSaving}
                   onClick={handleCancel}
                 >
